@@ -104,8 +104,8 @@ Multiple independent BIND9 servers, each with its own API. Define records once, 
   - [Single Server](#architecture-1-single-server)
   - [Multi-Primary Servers](#architecture-2-multi-primary-servers)
 - [Installation](#installation)
-  - [Option 1: Terraform Registry](#option-1-terraform-registry-recommended)
-  - [Option 2: GitHub Releases](#option-2-download-from-github-releases)
+  - [Option 1: Terraform Registry (Coming Soon)](#option-1-terraform-registry-coming-soon)
+  - [Option 2: GitHub Releases ✅](#option-2-download-from-github-releases--currently-available)
   - [Option 3: Build from Source](#option-3-build-from-source)
 - [Quick Start](#quick-start)
 - [Single Server Setup](#single-server-setup)
@@ -122,9 +122,11 @@ Multiple independent BIND9 servers, each with its own API. Define records once, 
 
 ## Installation
 
-### Option 1: Terraform Registry (Recommended)
+### Option 1: Terraform Registry (Coming Soon)
 
-The easiest way to use this provider is from the Terraform Registry:
+> ⏳ **Not yet available.** This option will be available after the provider is published to the Terraform Registry.
+
+Once published, this will be the easiest way - no manual download required:
 
 ```terraform
 terraform {
@@ -142,14 +144,11 @@ provider "bind9" {
 }
 ```
 
-Then run:
-```bash
-terraform init
-```
+Then simply run `terraform init` and Terraform will download the provider automatically.
 
 ---
 
-### Option 2: Download from GitHub Releases
+### Option 2: Download from GitHub Releases ✅ (Currently Available)
 
 Download pre-built binaries from GitHub releases.
 
