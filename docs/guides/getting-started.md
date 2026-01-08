@@ -2,27 +2,28 @@
 page_title: "Getting Started with BIND9 Provider"
 subcategory: "Guides"
 description: |-
-  Step-by-step guide to set up and use the BIND9 Terraform provider.
+  A quick start guide for using the BIND9 Terraform provider.
 ---
 
-# Getting Started Guide
+# Getting Started
 
-This guide walks you through setting up and using the BIND9 Terraform provider to manage your DNS infrastructure.
+This guide walks you through setting up the BIND9 provider and creating your first DNS zone and records.
 
 ## Prerequisites
 
-Before you begin, ensure you have:
+Before you begin, you need:
 
-1. **Terraform** >= 1.0 or **OpenTofu** >= 1.0 installed
-2. **BIND9 REST API** ([bind9-api](https://gitlab.com/Dermenjyan/bind9-api)) deployed and running
-3. **API credentials** (API key recommended)
+1. **BIND9 REST API** - A running instance of the [BIND9 REST API](https://gitlab.com/Dermenjyan/bind9-api)
+2. **API Key** - An API key or credentials for authentication
+3. **Terraform/OpenTofu** - Version 1.0 or later
 
 ## Step 1: Configure the Provider
 
-Create a new Terraform configuration:
+Create a new Terraform configuration file:
 
-```hcl
-# versions.tf
+```terraform
+# main.tf
+
 terraform {
   required_version = ">= 1.0"
   
@@ -34,251 +35,312 @@ terraform {
   }
 }
 
-# provider.tf
+# Configure the BIND9 provider
 provider "bind9" {
-  endpoint = var.bind9_endpoint
+  endpoint = "https://dns.example.com:8080"
   api_key  = var.bind9_api_key
 }
 
-# variables.tf
-variable "bind9_endpoint" {
-  type        = string
-  description = "BIND9 REST API endpoint"
-}
-
+# Variables
 variable "bind9_api_key" {
   type        = string
-  description = "API key for authentication"
   sensitive   = true
+  description = "API key for BIND9 REST API"
 }
-```
-
-Create a `terraform.tfvars` file (don't commit this to version control):
-
-```hcl
-bind9_endpoint = "http://dns.example.com:8080"
-bind9_api_key  = "your-api-key-here"
 ```
 
 ## Step 2: Create Your First Zone
 
-```hcl
-# main.tf
-resource "bind9_zone" "example" {
+Add a zone resource:
+
+```terraform
+# zones.tf
+
+resource "bind9_zone" "myzone" {
   name = "myzone.example.com"
   type = "master"
-  
+
+  # SOA Record settings
   soa_mname   = "ns1.example.com"
   soa_rname   = "hostmaster.example.com"
+  soa_refresh = 3600      # 1 hour
+  soa_retry   = 600       # 10 minutes
+  soa_expire  = 604800    # 1 week
+  soa_minimum = 86400     # 1 day
+
+  # Default TTL for records
   default_ttl = 3600
-  
-  nameservers = ["ns1.example.com", "ns2.example.com"]
+
+  # Nameservers
+  nameservers = [
+    "ns1.example.com",
+    "ns2.example.com",
+  ]
+
+  # Glue records (IP addresses for in-zone nameservers)
   ns_addresses = {
     "ns1.example.com" = "10.0.1.10"
     "ns2.example.com" = "10.0.1.11"
   }
-  
-  allow_update = ["key ddns-key"]
+
+  # Access control
+  allow_transfer = ["10.0.1.11"]  # Allow zone transfers to secondary
+  allow_update   = ["key ddns-key"]  # Allow dynamic updates with TSIG key
+  notify         = true  # Notify secondaries on changes
 }
 ```
 
-Initialize and apply:
+## Step 3: Create DNS Records
 
-```bash
-terraform init
-terraform plan
-terraform apply
-```
+Add some records to your zone:
 
-## Step 3: Add DNS Records
+```terraform
+# records.tf
 
-### Basic A Record
-
-```hcl
+# Web server
 resource "bind9_record" "www" {
-  zone    = bind9_zone.example.name
+  zone    = bind9_zone.myzone.name
   name    = "www"
   type    = "A"
   ttl     = 300
-  records = ["10.0.2.100"]
+  records = ["10.0.1.100"]
 }
-```
 
-### Multiple Records
+# Web server alias
+resource "bind9_record" "site" {
+  zone    = bind9_zone.myzone.name
+  name    = "site"
+  type    = "CNAME"
+  ttl     = 3600
+  records = ["www.myzone.example.com."]  # Note: trailing dot for FQDN
+}
 
-```hcl
+# Mail server
+resource "bind9_record" "mail" {
+  zone    = bind9_zone.myzone.name
+  name    = "mail"
+  type    = "A"
+  ttl     = 300
+  records = ["10.0.1.50"]
+}
+
 # MX records for email
 resource "bind9_record" "mx" {
-  zone    = bind9_zone.example.name
+  zone    = bind9_zone.myzone.name
   name    = "@"
   type    = "MX"
   ttl     = 3600
   records = [
-    "10 mail1.example.com.",
-    "20 mail2.example.com.",
+    "10 mail.myzone.example.com.",
   ]
 }
 
-# TXT record for SPF
+# SPF record for email security
 resource "bind9_record" "spf" {
-  zone    = bind9_zone.example.name
+  zone    = bind9_zone.myzone.name
   name    = "@"
   type    = "TXT"
   ttl     = 3600
-  records = ["v=spf1 mx ~all"]
-}
-
-# CNAME record
-resource "bind9_record" "blog" {
-  zone    = bind9_zone.example.name
-  name    = "blog"
-  type    = "CNAME"
-  ttl     = 300
-  records = ["www.myzone.example.com."]
+  records = ["v=spf1 mx -all"]
 }
 ```
 
-## Step 4: Enable DNSSEC (Optional)
-
-```hcl
-# Key Signing Key
-resource "bind9_dnssec_key" "ksk" {
-  zone      = bind9_zone.example.name
-  key_type  = "KSK"
-  algorithm = 13  # ECDSAP256SHA256
-  sign_zone = true
-}
-
-# Zone Signing Key
-resource "bind9_dnssec_key" "zsk" {
-  zone      = bind9_zone.example.name
-  key_type  = "ZSK"
-  algorithm = 13
-  
-  depends_on = [bind9_dnssec_key.ksk]
-}
-
-# Output DS records for registrar
-output "ds_records" {
-  value     = bind9_dnssec_key.ksk.ds_records
-  sensitive = false
-}
-```
-
-## Step 5: Import Existing Resources
-
-If you have existing zones and records, you can import them into Terraform.
-
-### Import a Zone
+## Step 4: Initialize and Apply
 
 ```bash
-terraform import bind9_zone.existing existing.example.com
+# Set your API key
+export TF_VAR_bind9_api_key="your-api-key-here"
+
+# Initialize Terraform
+terraform init
+
+# Preview changes
+terraform plan
+
+# Apply changes
+terraform apply
 ```
 
-### Import a Record
+## Step 5: Verify Your Configuration
 
-```bash
-# Format: terraform import bind9_record.<name> <zone>/<record_name>/<type>
-terraform import bind9_record.www example.com/www/A
+Query your zone information:
+
+```terraform
+# data.tf
+
+data "bind9_zone" "check" {
+  name = bind9_zone.myzone.name
+}
+
+output "zone_serial" {
+  value = data.bind9_zone.check.serial
+}
+
+output "zone_loaded" {
+  value = data.bind9_zone.check.loaded
+}
+
+data "bind9_records" "all" {
+  zone = bind9_zone.myzone.name
+}
+
+output "all_records" {
+  value = data.bind9_records.all.records
+}
 ```
 
 ## Common Patterns
 
-### Environment-Specific Records
+### Multiple Servers
 
-```hcl
-variable "environment" {
-  type = string
+```terraform
+provider "bind9" {
+  alias    = "primary"
+  endpoint = "https://dns1.example.com:8080"
+  api_key  = var.primary_api_key
 }
 
-variable "server_ips" {
-  type = map(list(string))
-  default = {
-    dev  = ["10.0.1.10"]
-    prod = ["10.0.1.20", "10.0.1.21"]
-  }
+provider "bind9" {
+  alias    = "secondary"
+  endpoint = "https://dns2.example.com:8080"
+  api_key  = var.secondary_api_key
 }
 
-resource "bind9_record" "app" {
-  zone    = bind9_zone.example.name
-  name    = "app"
-  type    = "A"
-  ttl     = var.environment == "prod" ? 300 : 60
-  records = var.server_ips[var.environment]
-}
-```
-
-### Using Data Sources
-
-```hcl
-# Query existing records
-data "bind9_record" "existing" {
-  zone = "example.com"
-  name = "legacy-server"
-  type = "A"
+resource "bind9_zone" "primary" {
+  provider = bind9.primary
+  name     = "example.com"
+  type     = "master"
+  # ...
 }
 
-# Create alias to existing server
-resource "bind9_record" "alias" {
-  zone    = "example.com"
-  name    = "new-alias"
-  type    = "A"
-  ttl     = 300
-  records = data.bind9_record.existing.records
+resource "bind9_zone" "secondary" {
+  provider = bind9.secondary
+  name     = "example.com"
+  type     = "slave"
 }
 ```
 
-### Bulk Record Generation
+### Define Records Once, Deploy to Multiple Servers
 
-```hcl
-# Generate multiple host records (like BIND9 $GENERATE)
+```terraform
 locals {
-  hosts = {
-    for i in range(1, 11) :
-    "host-${i}" => "10.0.3.${i}"
+  records = {
+    "www_A" = {
+      name    = "www"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.1.100"]
+    }
+    "app_A" = {
+      name    = "app"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.1.101"]
+    }
   }
 }
 
+resource "bind9_record" "primary" {
+  for_each = local.records
+  provider = bind9.primary
+
+  zone    = bind9_zone.primary.name
+  name    = each.value.name
+  type    = each.value.type
+  ttl     = each.value.ttl
+  records = each.value.records
+}
+
+resource "bind9_record" "secondary" {
+  for_each = local.records
+  provider = bind9.secondary
+
+  zone    = bind9_zone.secondary.name
+  name    = each.value.name
+  type    = each.value.type
+  ttl     = each.value.ttl
+  records = each.value.records
+}
+```
+
+### Generate Multiple Records (like BIND9 $GENERATE)
+
+```terraform
+# Create host-1 through host-10 with sequential IPs
 resource "bind9_record" "hosts" {
-  for_each = local.hosts
-  
-  zone    = bind9_zone.example.name
+  for_each = { for i in range(1, 11) : "host-${i}" => i }
+
+  zone    = bind9_zone.myzone.name
   name    = each.key
   type    = "A"
   ttl     = 300
-  records = [each.value]
+  records = ["10.0.1.${100 + each.value}"]
 }
 ```
 
-## Troubleshooting
+### Reverse DNS Zone
 
-### Common Errors
+```terraform
+# Reverse zone for 10.0.1.0/24
+resource "bind9_zone" "reverse" {
+  name = "1.0.10.in-addr.arpa"
+  type = "master"
 
-**Error: "zone not found"**
-- Ensure the zone exists or create it with `bind9_zone`
-- Check that the zone name is correct
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+}
 
-**Error: "authentication failed"**
-- Verify your API key or credentials
-- Check that the endpoint URL is correct
-
-**Error: "connection refused"**
-- Ensure the BIND9 REST API is running
-- Check firewall rules
-
-**Error: "NS has no address records"**
-- Add `ns_addresses` to your zone definition for in-zone nameservers
-
-### Enable Debug Logging
-
-```bash
-export TF_LOG=DEBUG
-terraform apply
+# PTR record for 10.0.1.100
+resource "bind9_record" "ptr_100" {
+  zone    = bind9_zone.reverse.name
+  name    = "100"
+  type    = "PTR"
+  ttl     = 3600
+  records = ["www.myzone.example.com."]
+}
 ```
 
 ## Next Steps
 
-- Read the [Zone Resource](../resources/zone.md) documentation
-- Read the [Record Resource](../resources/record.md) documentation
-- Explore [DNSSEC Key Management](../resources/dnssec_key.md)
-- Check out the [example configurations](https://github.com/harutyundermenjyan/terraform-provider-bind9/tree/main/examples)
+- Read the [Zone Resource Documentation](../resources/zone.md) for all zone options
+- Learn about [Record Types](../resources/record.md) and their formats
+- Set up [DNSSEC](../resources/dnssec_key.md) for your zones
+- Use [Data Sources](../data-sources/zone.md) to query existing configurations
+
+## Troubleshooting
+
+### Connection Errors
+
+```
+Error: Could not create BIND9 API client
+```
+
+- Verify the endpoint URL is correct
+- Check that the API server is running
+- Ensure network connectivity between Terraform and the API
+
+### Authentication Errors
+
+```
+Error: API error 401: Invalid authentication credentials
+```
+
+- Verify your API key is correct
+- Check that the API key has required permissions
+- Ensure the API key hasn't expired
+
+### Zone Validation Errors
+
+```
+Error: In-zone nameserver requires an IP address in ns_addresses
+```
+
+- Provide IP addresses for nameservers within the zone
+- Use the `ns_addresses` map for glue records
+
+### Record Format Errors
+
+- Always use trailing dots for FQDNs in CNAME, MX, NS, PTR targets
+- Format MX records as "priority hostname" (e.g., "10 mail.example.com.")
+- Format SRV records as "priority weight port target"
