@@ -15,15 +15,74 @@ A Terraform/OpenTofu provider for managing DNS zones and records on BIND9 server
 >
 > 📦 **Get the API:** [github.com/harutyundermenjyan/bind9-api](https://github.com/harutyundermenjyan/bind9-api)
 
-### Architecture
+---
+
+## Architecture Overview
+
+This provider supports multiple deployment architectures. Choose the one that fits your needs:
+
+### Architecture 1: Single Server
+
+The simplest setup - one BIND9 server with one API instance.
 
 ```
 ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
 │   Terraform/    │──────▶│   BIND9 REST    │──────▶│     BIND9       │
-│   OpenTofu      │ HTTPS │      API        │ rndc  │     Server      │
+│   OpenTofu      │ HTTP  │      API        │ rndc  │     Server      │
 └─────────────────┘       └─────────────────┘       └─────────────────┘
-     (this provider)      (required component)       (DNS server)
+     (this provider)           (:8080)              (DNS server)
 ```
+
+**Use case:** Development, small deployments, single DNS server.
+
+➡️ [Jump to Single Server Setup](#single-server-setup)
+
+---
+
+### Architecture 2: Multi-Primary Servers
+
+Multiple independent BIND9 servers, each with its own API. Define records once, deploy to all or selected servers.
+
+```
+                          ┌─────────────────┐       ┌─────────────────┐
+                     ┌───▶│   BIND9 API     │──────▶│     BIND9       │
+                     │    │   (dns1:8080)   │       │   Server 1      │
+                     │    └─────────────────┘       └─────────────────┘
+┌─────────────────┐  │
+│   Terraform/    │──┤    ┌─────────────────┐       ┌─────────────────┐
+│   OpenTofu      │  ├───▶│   BIND9 API     │──────▶│     BIND9       │
+│                 │  │    │   (dns2:8080)   │       │   Server 2      │
+└─────────────────┘  │    └─────────────────┘       └─────────────────┘
+                     │
+                     │    ┌─────────────────┐       ┌─────────────────┐
+                     └───▶│   BIND9 API     │──────▶│     BIND9       │
+                          │   (dns3:8080)   │       │   Server 3      │
+                          └─────────────────┘       └─────────────────┘
+```
+
+**Use case:** High availability, geographic distribution, separate environments.
+
+**Key features:**
+- Provider aliases for each server (`bind9.dns1`, `bind9.dns2`, etc.)
+- `servers = []` pattern - define records once, deploy to all or selected servers
+- `count` for conditional zone/record creation per server
+- Independent servers (no replication between them)
+
+➡️ [Jump to Multi-Server Setup](#multi-server-setup)
+
+---
+
+### Architecture Comparison
+
+| Feature | Single Server | Multi-Primary |
+|---------|---------------|---------------|
+| BIND9 servers | 1 | 2+ |
+| API instances | 1 | 1 per server |
+| Provider blocks | 1 | 1 per server (aliases) |
+| Record definition | Once | Once (with `servers = []` targeting) |
+| Zone replication | N/A | Manual (same config) |
+| Use case | Simple/Dev | HA/Geo/Multi-env |
+| Complexity | Low | Medium |
 
 ---
 
@@ -41,6 +100,9 @@ A Terraform/OpenTofu provider for managing DNS zones and records on BIND9 server
 
 ## Table of Contents
 
+- [Architecture Overview](#architecture-overview)
+  - [Single Server](#architecture-1-single-server)
+  - [Multi-Primary Servers](#architecture-2-multi-primary-servers)
 - [Quick Start](#quick-start)
 - [Single Server Setup](#single-server-setup)
 - [Multi-Server Setup](#multi-server-setup)
