@@ -215,6 +215,37 @@ In addition to all arguments above, the following attributes are exported:
 
 7. **Keep backup of keys** - BIND9 stores keys in the keys directory.
 
+## Import
+
+~> **Note:** DNSSEC keys do not support import.
+
+DNSSEC keys are cryptographic resources that are generated on the server. Due to their nature:
+
+1. **Private keys** are stored securely on the BIND9 server and cannot be retrieved via API
+2. **Key generation** is a one-time operation that creates both public and private key material
+3. **Security** - importing would require exposing private key material
+
+To manage existing DNSSEC keys:
+
+1. Use data sources to query existing keys' public information
+2. Create new keys through Terraform and perform a key rollover
+3. Let Terraform manage newly created keys going forward
+
+### Recommended Approach for Existing Keys
+
+```terraform
+# Query existing keys (if API supports it)
+# Then create new keys and perform rollover
+
+resource "bind9_dnssec_key" "new_ksk" {
+  zone      = "example.com"
+  key_type  = "KSK"
+  algorithm = 13
+}
+
+# After DS record propagation, remove old keys manually
+```
+
 ## Notes
 
 - DNSSEC keys are immutable once created. To change algorithm or key type, create a new key and retire the old one.
