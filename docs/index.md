@@ -43,11 +43,33 @@ The BIND9 provider allows you to manage DNS zones and records on a BIND9 server 
 
 ## Prerequisites
 
-This provider requires:
+~> **Important:** This provider requires the **BIND9 REST API** to be installed on your BIND9 server(s).
 
-1. **BIND9 REST API** - A running instance of the BIND9 REST API that this provider communicates with
-2. **Authentication** - Either an API key or username/password for the REST API
-3. **Network Access** - The Terraform host must be able to reach the API endpoint
+### Required: BIND9 REST API
+
+This provider communicates with BIND9 through a REST API - it does NOT connect directly to BIND9.
+
+**You must install the BIND9 REST API first:**
+
+| Component | Repository | Description |
+|-----------|------------|-------------|
+| **BIND9 REST API** | [github.com/harutyundermenjyan/bind9-api](https://github.com/harutyundermenjyan/bind9-api) | REST API server that runs on each BIND9 server |
+
+### Architecture
+
+```
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│   Terraform/    │──────▶│   BIND9 REST    │──────▶│     BIND9       │
+│   OpenTofu      │ HTTPS │      API        │ rndc  │     Server      │
+└─────────────────┘       └─────────────────┘       └─────────────────┘
+     (this provider)      (required component)       (DNS server)
+```
+
+### Checklist
+
+1. **BIND9 REST API** - Install and configure on each BIND9 server ([Installation Guide](https://github.com/harutyundermenjyan/bind9-api#quick-start))
+2. **Authentication** - Generate an API key during API setup
+3. **Network Access** - Ensure Terraform can reach the API endpoint (default port: 8080)
 
 ## Example Usage
 

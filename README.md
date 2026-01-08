@@ -5,6 +5,18 @@
 
 A Terraform/OpenTofu provider for managing DNS zones and records on BIND9 servers via REST API.
 
+---
+
+## ⚠️ Required: BIND9 REST API
+
+> **This provider requires the [BIND9 REST API](https://github.com/harutyundermenjyan/bind9-api) to be installed and running on your BIND9 server(s).**
+>
+> The provider communicates with BIND9 through this REST API - it does NOT connect directly to BIND9.
+>
+> 📦 **Get the API:** [github.com/harutyundermenjyan/bind9-api](https://github.com/harutyundermenjyan/bind9-api)
+
+---
+
 ## Features
 
 - **Zone Management** - Create, read, update, delete DNS zones (master, slave, forward, stub)
@@ -278,8 +290,21 @@ Full documentation is available on the [Terraform Registry](https://registry.ter
 
 ## Requirements
 
-- Terraform >= 1.0 or OpenTofu >= 1.0
-- BIND9 REST API server
+| Requirement | Description |
+|-------------|-------------|
+| Terraform >= 1.0 or OpenTofu >= 1.0 | Infrastructure as Code tool |
+| **[BIND9 REST API](https://github.com/harutyundermenjyan/bind9-api)** | **Required** - Must be installed on each BIND9 server |
+| BIND9 9.x | DNS server with rndc and nsupdate |
+
+### Architecture
+
+```
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│   Terraform/    │──────▶│   BIND9 REST    │──────▶│     BIND9       │
+│   OpenTofu      │ HTTPS │      API        │ rndc  │     Server      │
+└─────────────────┘       └─────────────────┘       └─────────────────┘
+     (this provider)      (required component)       (DNS server)
+```
 
 ## Building from Source
 
