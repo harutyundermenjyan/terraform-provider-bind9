@@ -15,6 +15,16 @@ A Terraform/OpenTofu provider for managing DNS zones and records on BIND9 server
 >
 > 📦 **Get the API:** [github.com/harutyundermenjyan/bind9-api](https://github.com/harutyundermenjyan/bind9-api)
 
+### Architecture
+
+```
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│   Terraform/    │──────▶│   BIND9 REST    │──────▶│     BIND9       │
+│   OpenTofu      │ HTTPS │      API        │ rndc  │     Server      │
+└─────────────────┘       └─────────────────┘       └─────────────────┘
+     (this provider)      (required component)       (DNS server)
+```
+
 ---
 
 ## Features
@@ -25,6 +35,24 @@ A Terraform/OpenTofu provider for managing DNS zones and records on BIND9 server
 - **Data Sources** - Query existing zones and records
 - **Import Support** - Import existing resources into Terraform state
 - **Multi-Server** - Manage multiple BIND9 servers using provider aliases
+- **Bulk Generation** - Create many records using Terraform's `for_each` and `range()`
+
+---
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Single Server Setup](#single-server-setup)
+- [Multi-Server Setup](#multi-server-setup)
+- [Bulk Record Generation](#bulk-record-generation)
+- [Resources](#resources)
+- [Data Sources](#data-sources)
+- [Supported Record Types](#supported-record-types)
+- [Provider Arguments](#provider-arguments)
+- [Import](#import)
+- [Documentation](#documentation)
+
+---
 
 ## Quick Start
 
@@ -45,7 +73,7 @@ terraform {
 
 ```terraform
 provider "bind9" {
-  endpoint = "https://dns.example.com:8080"
+  endpoint = "http://localhost:8080"
   api_key  = var.bind9_api_key
 }
 ```
@@ -53,40 +81,133 @@ provider "bind9" {
 Or use environment variables:
 
 ```bash
-export BIND9_ENDPOINT="https://dns.example.com:8080"
+export BIND9_ENDPOINT="http://localhost:8080"
 export BIND9_API_KEY="your-api-key-here"
 ```
 
-### Create a Zone
+---
+
+## Single Server Setup
+
+Complete example for managing a single BIND9 server.
+
+### File Structure
+
+```
+my-dns/
+├── providers.tf      # Provider configuration
+├── variables.tf      # Variables
+├── zones.tf          # Zone definitions
+├── records.tf        # DNS records
+└── terraform.tfvars  # Your values (gitignored)
+```
+
+### providers.tf
+
+```terraform
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    bind9 = {
+      source  = "harutyundermenjyan/bind9"
+      version = "~> 1.0"
+    }
+  }
+}
+
+provider "bind9" {
+  endpoint = var.bind9_endpoint
+  api_key  = var.bind9_api_key
+}
+```
+
+### variables.tf
+
+```terraform
+variable "bind9_endpoint" {
+  description = "BIND9 API endpoint URL"
+  type        = string
+  default     = "http://localhost:8080"
+}
+
+variable "bind9_api_key" {
+  description = "BIND9 API key"
+  type        = string
+  sensitive   = true
+}
+```
+
+### zones.tf
 
 ```terraform
 resource "bind9_zone" "example" {
-  name = "example.com"
-  type = "master"
+  name        = "example.com"
+  type        = "master"
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  soa_refresh = 3600
+  soa_retry   = 600
+  soa_expire  = 604800
+  soa_minimum = 86400
+  default_ttl = 3600
 
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+
+  # Glue records for in-zone nameservers
+  ns_addresses = {
+    "ns1.example.com" = "10.0.0.1"
+    "ns2.example.com" = "10.0.0.2"
+  }
+
+  allow_update           = ["key ddns-key"]
+  delete_file_on_destroy = true
+}
+
+# Reverse DNS zone
+resource "bind9_zone" "reverse" {
+  name        = "0.0.10.in-addr.arpa"
+  type        = "master"
   soa_mname   = "ns1.example.com"
   soa_rname   = "hostmaster.example.com"
   default_ttl = 3600
 
   nameservers = ["ns1.example.com", "ns2.example.com"]
-  
+
   ns_addresses = {
-    "ns1.example.com" = "10.0.1.10"
-    "ns2.example.com" = "10.0.1.11"
+    "ns1.example.com" = "10.0.0.1"
+    "ns2.example.com" = "10.0.0.2"
   }
 }
 ```
 
-### Create Records
+### records.tf
 
 ```terraform
-# A Record
+# A Records
 resource "bind9_record" "www" {
   zone    = bind9_zone.example.name
   name    = "www"
   type    = "A"
   ttl     = 300
-  records = ["10.0.1.100"]
+  records = ["10.0.0.100"]
+}
+
+resource "bind9_record" "mail" {
+  zone    = bind9_zone.example.name
+  name    = "mail"
+  type    = "A"
+  ttl     = 300
+  records = ["10.0.0.50"]
+}
+
+# CNAME Record
+resource "bind9_record" "api" {
+  zone    = bind9_zone.example.name
+  name    = "api"
+  type    = "CNAME"
+  ttl     = 300
+  records = ["www.example.com."]
 }
 
 # MX Record
@@ -124,9 +245,421 @@ resource "bind9_record" "caa" {
   ttl     = 3600
   records = ["0 issue \"letsencrypt.org\""]
 }
+
+# PTR Record (Reverse DNS)
+resource "bind9_record" "ptr_www" {
+  zone    = bind9_zone.reverse.name
+  name    = "100"
+  type    = "PTR"
+  ttl     = 300
+  records = ["www.example.com."]
+}
 ```
 
-### Enable DNSSEC
+### terraform.tfvars
+
+```terraform
+bind9_endpoint = "http://localhost:8080"
+bind9_api_key  = "your-api-key-here"
+```
+
+---
+
+## Multi-Server Setup
+
+For managing multiple independent BIND9 servers - **define records once, deploy to all or selected servers**.
+
+### Architecture
+
+```
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│   Terraform/    │──────▶│   BIND9 API     │──────▶│     BIND9       │
+│   OpenTofu      │       │   (dns1:8080)   │       │   Server 1      │
+│                 │       └─────────────────┘       └─────────────────┘
+│                 │
+│                 │       ┌─────────────────┐       ┌─────────────────┐
+│                 │──────▶│   BIND9 API     │──────▶│     BIND9       │
+│                 │       │   (dns2:8080)   │       │   Server 2      │
+└─────────────────┘       └─────────────────┘       └─────────────────┘
+```
+
+### File Structure
+
+```
+bind9-orchestrator/
+├── providers.tf          # Provider aliases for each server
+├── variables.tf          # Server definitions
+├── locals.tf             # Record definitions & expansion
+├── zones.tf              # Zone resources per server
+├── records.tf            # Records with server targeting
+├── outputs.tf            # Outputs
+└── terraform.tfvars      # Your server configuration (gitignored)
+```
+
+### providers.tf
+
+```terraform
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    bind9 = {
+      source  = "harutyundermenjyan/bind9"
+      version = "~> 1.0"
+    }
+  }
+}
+
+# Provider for each DNS server
+provider "bind9" {
+  alias    = "dns1"
+  endpoint = var.servers["dns1"].endpoint
+  api_key  = var.servers["dns1"].api_key
+}
+
+provider "bind9" {
+  alias    = "dns2"
+  endpoint = var.servers["dns2"].endpoint
+  api_key  = var.servers["dns2"].api_key
+}
+
+# Default provider (required by OpenTofu)
+provider "bind9" {
+  endpoint = var.servers["dns1"].endpoint
+  api_key  = var.servers["dns1"].api_key
+}
+```
+
+### variables.tf
+
+```terraform
+variable "servers" {
+  description = "Map of BIND9 servers to manage"
+  type = map(object({
+    endpoint = string
+    api_key  = string
+    enabled  = bool
+  }))
+}
+```
+
+### locals.tf
+
+```terraform
+locals {
+  # Filter to only enabled servers
+  enabled_servers = {
+    for name, server in var.servers : name => server
+    if server.enabled
+  }
+
+  # ==========================================================================
+  # Define records ONCE - deploy to ALL or SELECTED servers
+  # ==========================================================================
+  # servers = []               → deploy to ALL enabled servers
+  # servers = ["dns1"]         → deploy to dns1 only
+  # servers = ["dns1", "dns2"] → deploy to both dns1 and dns2
+  # ==========================================================================
+
+  example_com_records = {
+    # A Records
+    "www_A" = {
+      name    = "www"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.0.100"]
+      servers = []              # ALL servers
+    }
+    "app_A" = {
+      name    = "app"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.0.101"]
+      servers = []              # ALL servers
+    }
+    "db_A" = {
+      name    = "db"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.0.102"]
+      servers = ["dns1"]        # dns1 only (internal)
+    }
+    "staging_A" = {
+      name    = "staging"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.0.200"]
+      servers = ["dns2"]        # dns2 only (staging env)
+    }
+
+    # CNAME Records
+    "api_CNAME" = {
+      name    = "api"
+      type    = "CNAME"
+      ttl     = 300
+      records = ["app.example.com."]
+      servers = []
+    }
+
+    # MX Records
+    "mx_MX" = {
+      name    = "@"
+      type    = "MX"
+      ttl     = 3600
+      records = ["10 mail.example.com."]
+      servers = []
+    }
+
+    # TXT Records
+    "spf_TXT" = {
+      name    = "@"
+      type    = "TXT"
+      ttl     = 3600
+      records = ["v=spf1 mx ~all"]
+      servers = []
+    }
+  }
+
+  # Expand records to target servers
+  example_com_records_expanded = merge([
+    for record_key, record in local.example_com_records : {
+      for server_name, server in local.enabled_servers :
+      "${record_key}_${server_name}" => merge(record, { server = server_name })
+      if length(record.servers) == 0 || contains(record.servers, server_name)
+    }
+  ]...)
+}
+```
+
+### zones.tf
+
+```terraform
+# Zone on dns1
+resource "bind9_zone" "example_dns1" {
+  count    = try(var.servers["dns1"].enabled, false) ? 1 : 0
+  provider = bind9.dns1
+
+  name        = "example.com"
+  type        = "master"
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  soa_refresh = 3600
+  soa_retry   = 600
+  soa_expire  = 604800
+  soa_minimum = 86400
+  default_ttl = 3600
+
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+
+  ns_addresses = {
+    "ns1.example.com" = "10.0.0.1"
+    "ns2.example.com" = "10.0.0.2"
+  }
+
+  allow_update           = ["key ddns-key"]
+  delete_file_on_destroy = true
+}
+
+# Zone on dns2
+resource "bind9_zone" "example_dns2" {
+  count    = try(var.servers["dns2"].enabled, false) ? 1 : 0
+  provider = bind9.dns2
+
+  name        = "example.com"
+  type        = "master"
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  soa_refresh = 3600
+  soa_retry   = 600
+  soa_expire  = 604800
+  soa_minimum = 86400
+  default_ttl = 3600
+
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+
+  ns_addresses = {
+    "ns1.example.com" = "10.0.0.1"
+    "ns2.example.com" = "10.0.0.2"
+  }
+
+  allow_update           = ["key ddns-key"]
+  delete_file_on_destroy = true
+}
+```
+
+### records.tf
+
+```terraform
+# Records for dns1
+resource "bind9_record" "example_dns1" {
+  for_each = {
+    for k, v in local.example_com_records_expanded : k => v
+    if v.server == "dns1"
+  }
+  provider = bind9.dns1
+
+  zone    = bind9_zone.example_dns1[0].name
+  name    = each.value.name
+  type    = each.value.type
+  ttl     = each.value.ttl
+  records = each.value.records
+}
+
+# Records for dns2
+resource "bind9_record" "example_dns2" {
+  for_each = {
+    for k, v in local.example_com_records_expanded : k => v
+    if v.server == "dns2"
+  }
+  provider = bind9.dns2
+
+  zone    = bind9_zone.example_dns2[0].name
+  name    = each.value.name
+  type    = each.value.type
+  ttl     = each.value.ttl
+  records = each.value.records
+}
+```
+
+### outputs.tf
+
+```terraform
+output "zones" {
+  description = "Created zones per server"
+  value = {
+    dns1 = try(bind9_zone.example_dns1[0].name, null)
+    dns2 = try(bind9_zone.example_dns2[0].name, null)
+  }
+}
+
+output "record_count" {
+  description = "Number of records created per server"
+  value = {
+    dns1 = length(bind9_record.example_dns1)
+    dns2 = length(bind9_record.example_dns2)
+  }
+}
+```
+
+### terraform.tfvars
+
+```terraform
+servers = {
+  "dns1" = {
+    endpoint = "http://localhost:8080"   # SSH tunnel or direct
+    api_key  = "your-api-key-for-dns1"
+    enabled  = true
+  }
+  "dns2" = {
+    endpoint = "http://localhost:8081"
+    api_key  = "your-api-key-for-dns2"
+    enabled  = true
+  }
+}
+```
+
+### Using SSH Tunnels
+
+If the BIND9 API is not directly accessible:
+
+```bash
+# Terminal 1: SSH tunnel to dns1
+ssh -L 8080:localhost:8080 user@dns1.example.com
+
+# Terminal 2: SSH tunnel to dns2
+ssh -L 8081:localhost:8080 user@dns2.example.com
+
+# Terminal 3: Run Terraform
+tofu apply
+```
+
+---
+
+## Bulk Record Generation
+
+### $GENERATE Equivalent
+
+BIND9's `$GENERATE` directive creates multiple similar records. Use Terraform's `range()` for the same result:
+
+```terraform
+locals {
+  # Equivalent to BIND9: $GENERATE 1-50 host-$ A 10.0.1.$
+  generated_hosts = {
+    for i in range(1, 51) :
+    "host-${i}_A" => {
+      name    = "host-${i}"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.1.${i}"]
+      servers = []
+    }
+  }
+
+  # With step - equivalent to: $GENERATE 0-100/2 even-$ A 10.0.2.$
+  generated_even = {
+    for i in range(0, 101, 2) :  # start=0, end=101 (exclusive), step=2
+    "even-${i}_A" => {
+      name    = "even-${i}"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.2.${i}"]
+      servers = []
+    }
+  }
+
+  # Reverse PTR records - equivalent to: $GENERATE 1-254 $ PTR host-$.example.com.
+  generated_ptr = {
+    for i in range(1, 255) :
+    "${i}_PTR" => {
+      name    = "${i}"
+      type    = "PTR"
+      ttl     = 3600
+      records = ["host-${i}.example.com."]
+      servers = []
+    }
+  }
+}
+
+resource "bind9_record" "generated" {
+  for_each = local.generated_hosts
+
+  zone    = bind9_zone.example.name
+  name    = each.value.name
+  type    = each.value.type
+  ttl     = each.value.ttl
+  records = each.value.records
+}
+```
+
+### Dynamic Records from Lists
+
+```terraform
+variable "web_servers" {
+  type = map(string)
+  default = {
+    "web1" = "10.0.0.101"
+    "web2" = "10.0.0.102"
+    "web3" = "10.0.0.103"
+    "web4" = "10.0.0.104"
+  }
+}
+
+resource "bind9_record" "web_servers" {
+  for_each = var.web_servers
+
+  zone    = bind9_zone.example.name
+  name    = each.key
+  type    = "A"
+  ttl     = 300
+  records = [each.value]
+}
+```
+
+---
+
+## DNSSEC
+
+### Enable DNSSEC on a Zone
 
 ```terraform
 resource "bind9_dnssec_key" "ksk" {
@@ -139,16 +672,35 @@ resource "bind9_dnssec_key" "zsk" {
   zone      = bind9_zone.example.name
   key_type  = "ZSK"
   algorithm = 13
-  sign_zone = true
+  sign_zone = true  # Sign the zone after key creation
 }
 
-# DS records to submit to registrar
+# DS records to submit to your domain registrar
 output "ds_records" {
   value = bind9_dnssec_key.ksk.ds_records
 }
 ```
 
-### Query Existing Resources
+---
+
+## Resources
+
+| Resource | Description |
+|----------|-------------|
+| [`bind9_zone`](docs/resources/zone.md) | Manages DNS zones (master, slave, forward, stub) |
+| [`bind9_record`](docs/resources/record.md) | Manages DNS records (A, AAAA, CNAME, MX, TXT, etc.) |
+| [`bind9_dnssec_key`](docs/resources/dnssec_key.md) | Manages DNSSEC keys (KSK, ZSK, CSK) |
+
+## Data Sources
+
+| Data Source | Description |
+|-------------|-------------|
+| [`bind9_zone`](docs/data-sources/zone.md) | Query a specific zone |
+| [`bind9_zones`](docs/data-sources/zones.md) | List all zones |
+| [`bind9_record`](docs/data-sources/record.md) | Query a specific record |
+| [`bind9_records`](docs/data-sources/records.md) | List records in a zone |
+
+### Query Examples
 
 ```terraform
 # Get zone info
@@ -170,65 +722,54 @@ data "bind9_record" "www" {
 data "bind9_records" "all" {
   zone = "example.com"
 }
+
+# Filter records by type
+data "bind9_records" "mx_records" {
+  zone = "example.com"
+  type = "MX"
+}
 ```
-
-## Resources
-
-| Resource | Description |
-|----------|-------------|
-| `bind9_zone` | Manages DNS zones (master, slave, forward, stub) |
-| `bind9_record` | Manages DNS records (A, AAAA, CNAME, MX, TXT, etc.) |
-| `bind9_dnssec_key` | Manages DNSSEC keys (KSK, ZSK, CSK) |
-
-## Data Sources
-
-| Data Source | Description |
-|-------------|-------------|
-| `bind9_zone` | Query a specific zone |
-| `bind9_zones` | List all zones |
-| `bind9_record` | Query a specific record |
-| `bind9_records` | List records in a zone |
 
 ## Supported Record Types
 
-| Type | Description |
-|------|-------------|
-| `A` | IPv4 address |
-| `AAAA` | IPv6 address |
-| `CNAME` | Canonical name (alias) |
-| `MX` | Mail exchange |
-| `TXT` | Text record |
-| `NS` | Nameserver |
-| `PTR` | Pointer (reverse DNS) |
-| `SRV` | Service locator |
-| `CAA` | Certificate Authority Authorization |
-| `NAPTR` | Name Authority Pointer |
-| `SSHFP` | SSH fingerprint |
-| `TLSA` | DANE/TLS Association |
-| `DNAME` | Delegation name |
-| `LOC` | Geographic location |
-| `HTTPS` | HTTPS binding |
-| `SVCB` | Service binding |
-| `HINFO` | Host information |
-| `RP` | Responsible person |
-| `URI` | Uniform Resource Identifier |
-| `DNSKEY` | DNSSEC public key |
-| `DS` | Delegation Signer |
+| Type | Description | Example |
+|------|-------------|---------|
+| `A` | IPv4 address | `["10.0.0.100"]` |
+| `AAAA` | IPv6 address | `["2001:db8::1"]` |
+| `CNAME` | Canonical name (alias) | `["www.example.com."]` |
+| `MX` | Mail exchange | `["10 mail.example.com."]` |
+| `TXT` | Text record | `["v=spf1 mx -all"]` |
+| `NS` | Nameserver | `["ns1.example.com."]` |
+| `PTR` | Pointer (reverse DNS) | `["www.example.com."]` |
+| `SRV` | Service locator | `["10 60 5060 sip.example.com."]` |
+| `CAA` | Certificate Authority | `["0 issue \"letsencrypt.org\""]` |
+| `NAPTR` | Name Authority Pointer | `["100 10 \"\" \"\" \"!^.*$!sip:info@example.com!\" ."]` |
+| `SSHFP` | SSH fingerprint | `["2 1 123456..."]` |
+| `TLSA` | DANE/TLS Association | `["3 1 1 abc123..."]` |
+| `DNAME` | Delegation name | `["other.example.com."]` |
+| `LOC` | Geographic location | `["52 22 23.000 N 4 53 32.000 E 0.00m"]` |
+| `HTTPS` | HTTPS binding | `["1 . alpn=\"h2,h3\""]` |
+| `SVCB` | Service binding | `["1 . alpn=\"h2\""]` |
+| `HINFO` | Host information | `["Intel Linux"]` |
+| `RP` | Responsible person | `["admin.example.com. ."]` |
+| `URI` | Uniform Resource Identifier | `["10 1 \"https://example.com/\""]` |
+| `DNSKEY` | DNSSEC public key | (managed by DNSSEC resources) |
+| `DS` | Delegation Signer | (managed by DNSSEC resources) |
 
 ## Provider Arguments
 
-| Argument | Description | Default |
-|----------|-------------|---------|
-| `endpoint` | BIND9 API URL (or `BIND9_ENDPOINT` env var) | Required |
-| `api_key` | API key (or `BIND9_API_KEY` env var) | - |
-| `username` | Username for JWT auth (or `BIND9_USERNAME` env var) | - |
-| `password` | Password for JWT auth (or `BIND9_PASSWORD` env var) | - |
-| `insecure` | Skip TLS verification | `false` |
-| `timeout` | Request timeout in seconds | `30` |
+| Argument | Description | Default | Env Var |
+|----------|-------------|---------|---------|
+| `endpoint` | BIND9 API URL | Required | `BIND9_ENDPOINT` |
+| `api_key` | API key for authentication | - | `BIND9_API_KEY` |
+| `username` | Username for JWT auth | - | `BIND9_USERNAME` |
+| `password` | Password for JWT auth | - | `BIND9_PASSWORD` |
+| `insecure` | Skip TLS certificate verification | `false` | - |
+| `timeout` | Request timeout in seconds | `30` | - |
 
 ## Import
 
-Import existing resources:
+Import existing resources into Terraform state:
 
 ```bash
 # Import a zone
@@ -237,41 +778,17 @@ terraform import bind9_zone.example example.com
 # Import a record (format: zone/name/type)
 terraform import bind9_record.www example.com/www/A
 terraform import bind9_record.mx "example.com/@/MX"
+
+# DNSSEC keys cannot be imported (security reasons)
 ```
 
-## Multi-Server Configuration
-
-```terraform
-provider "bind9" {
-  alias    = "dns1"
-  endpoint = "https://dns1.example.com:8080"
-  api_key  = var.dns1_api_key
-}
-
-provider "bind9" {
-  alias    = "dns2"
-  endpoint = "https://dns2.example.com:8080"
-  api_key  = var.dns2_api_key
-}
-
-resource "bind9_zone" "primary" {
-  provider = bind9.dns1
-  name     = "example.com"
-  type     = "master"
-  # ...
-}
-
-resource "bind9_zone" "secondary" {
-  provider = bind9.dns2
-  name     = "example.com"
-  type     = "slave"
-}
-```
+---
 
 ## Documentation
 
 Full documentation is available on the [Terraform Registry](https://registry.terraform.io/providers/harutyundermenjyan/bind9/latest/docs).
 
+- [Getting Started](docs/guides/getting-started.md)
 - [Provider Configuration](docs/index.md)
 - [bind9_zone Resource](docs/resources/zone.md)
 - [bind9_record Resource](docs/resources/record.md)
@@ -281,12 +798,15 @@ Full documentation is available on the [Terraform Registry](https://registry.ter
 - [bind9_record Data Source](docs/data-sources/record.md)
 - [bind9_records Data Source](docs/data-sources/records.md)
 
+---
+
 ## Related Projects
 
 | Project | Description |
 |---------|-------------|
-| [bind9-api](https://gitlab.com/Dermenjyan/bind9-api) | BIND9 REST API server |
-| [bind9-orchestrator](https://gitlab.com/Dermenjyan/bind9-orchestrator) | Example configurations |
+| **[bind9-api](https://github.com/harutyundermenjyan/bind9-api)** | BIND9 REST API server (**required**) |
+
+---
 
 ## Requirements
 
@@ -296,15 +816,7 @@ Full documentation is available on the [Terraform Registry](https://registry.ter
 | **[BIND9 REST API](https://github.com/harutyundermenjyan/bind9-api)** | **Required** - Must be installed on each BIND9 server |
 | BIND9 9.x | DNS server with rndc and nsupdate |
 
-### Architecture
-
-```
-┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-│   Terraform/    │──────▶│   BIND9 REST    │──────▶│     BIND9       │
-│   OpenTofu      │ HTTPS │      API        │ rndc  │     Server      │
-└─────────────────┘       └─────────────────┘       └─────────────────┘
-     (this provider)      (required component)       (DNS server)
-```
+---
 
 ## Building from Source
 
@@ -323,16 +835,18 @@ go test -v ./...
 # Build
 go build -o terraform-provider-bind9
 
-# Install locally
-make install
+# Install locally for testing
+mkdir -p ~/.terraform.d/plugins/local/bind9/bind9/1.0.0/$(go env GOOS)_$(go env GOARCH)
+cp terraform-provider-bind9 ~/.terraform.d/plugins/local/bind9/bind9/1.0.0/$(go env GOOS)_$(go env GOARCH)/
 ```
+
+---
 
 ## Author
 
 **Harutyun Dermenjyan**
 
 - GitHub: [@harutyundermenjyan](https://github.com/harutyundermenjyan)
-- GitLab: [@Dermenjyan](https://gitlab.com/Dermenjyan)
 
 ## License
 
