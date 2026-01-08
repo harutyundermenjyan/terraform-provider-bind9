@@ -105,7 +105,8 @@ Multiple independent BIND9 servers, each with its own API. Define records once, 
   - [Multi-Primary Servers](#architecture-2-multi-primary-servers)
 - [Installation](#installation)
   - [Option 1: Terraform Registry](#option-1-terraform-registry-recommended)
-  - [Option 2: Build from Source](#option-2-build-from-source-local-installation)
+  - [Option 2: GitHub Releases](#option-2-download-from-github-releases)
+  - [Option 3: Build from Source](#option-3-build-from-source)
 - [Quick Start](#quick-start)
 - [Single Server Setup](#single-server-setup)
 - [Multi-Server Setup](#multi-server-setup)
@@ -148,64 +149,69 @@ terraform init
 
 ---
 
-### Option 2: Build from Source (Local Installation)
+### Option 2: Download from GitHub Releases
 
-Build and install the provider locally. Requires [Go 1.21+](https://go.dev/dl/).
+Download pre-built binaries from GitHub releases.
 
 #### Supported Platforms
 
-| OS | Architecture | Notes |
-|----|--------------|-------|
-| Linux | amd64 (x86_64) | Most common servers |
-| Linux | arm64 | ARM servers, Raspberry Pi |
-| macOS | amd64 (Intel) | Intel Macs |
-| macOS | arm64 (Apple Silicon) | M1/M2/M3 Macs |
+| OS | Architecture | File |
+|----|--------------|------|
+| Linux | amd64 (x86_64) | `terraform-provider-bind9_1.0.0_linux_amd64.zip` |
+| Linux | arm64 | `terraform-provider-bind9_1.0.0_linux_arm64.zip` |
+| macOS | amd64 (Intel) | `terraform-provider-bind9_1.0.0_darwin_amd64.zip` |
+| macOS | arm64 (Apple Silicon) | `terraform-provider-bind9_1.0.0_darwin_arm64.zip` |
+| Windows | amd64 | `terraform-provider-bind9_1.0.0_windows_amd64.zip` |
+| FreeBSD | amd64 | `terraform-provider-bind9_1.0.0_freebsd_amd64.zip` |
 
-#### Step 1: Clone and Build
+#### Step 1: Download
 
-```bash
-# Clone the repository
-git clone https://github.com/harutyundermenjyan/terraform-provider-bind9.git
-cd terraform-provider-bind9
+Download from: **https://github.com/harutyundermenjyan/terraform-provider-bind9/releases**
 
-# Build for your platform
-go build -o terraform-provider-bind9
-```
-
-#### Step 2: Install the Provider
+Or use command line:
 
 **Linux (amd64):**
 ```bash
-mkdir -p ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/linux_amd64/
-cp terraform-provider-bind9 ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/linux_amd64/
-chmod +x ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/linux_amd64/terraform-provider-bind9
+VERSION="1.0.0"
+curl -LO "https://github.com/harutyundermenjyan/terraform-provider-bind9/releases/download/v${VERSION}/terraform-provider-bind9_${VERSION}_linux_amd64.zip"
+unzip terraform-provider-bind9_${VERSION}_linux_amd64.zip
 ```
 
-**Linux (arm64):**
+**macOS (Apple Silicon):**
 ```bash
-mkdir -p ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/linux_arm64/
-cp terraform-provider-bind9 ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/linux_arm64/
-chmod +x ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/linux_arm64/terraform-provider-bind9
+VERSION="1.0.0"
+curl -LO "https://github.com/harutyundermenjyan/terraform-provider-bind9/releases/download/v${VERSION}/terraform-provider-bind9_${VERSION}_darwin_arm64.zip"
+unzip terraform-provider-bind9_${VERSION}_darwin_arm64.zip
 ```
 
 **macOS (Intel):**
 ```bash
-mkdir -p ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/darwin_amd64/
-cp terraform-provider-bind9 ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/darwin_amd64/
-chmod +x ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/darwin_amd64/terraform-provider-bind9
+VERSION="1.0.0"
+curl -LO "https://github.com/harutyundermenjyan/terraform-provider-bind9/releases/download/v${VERSION}/terraform-provider-bind9_${VERSION}_darwin_amd64.zip"
+unzip terraform-provider-bind9_${VERSION}_darwin_amd64.zip
+```
+
+#### Step 2: Install
+
+**Linux (amd64):**
+```bash
+mkdir -p ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/linux_amd64/
+mv terraform-provider-bind9_v1.0.0 ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/linux_amd64/terraform-provider-bind9
+chmod +x ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/linux_amd64/terraform-provider-bind9
 ```
 
 **macOS (Apple Silicon):**
 ```bash
 mkdir -p ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/darwin_arm64/
-cp terraform-provider-bind9 ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/darwin_arm64/
+mv terraform-provider-bind9_v1.0.0 ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/darwin_arm64/terraform-provider-bind9
 chmod +x ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/darwin_arm64/terraform-provider-bind9
 ```
 
-**One-liner (auto-detects OS/arch):**
+**macOS (Intel):**
 ```bash
-mkdir -p ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/$(go env GOOS)_$(go env GOARCH)/
-cp terraform-provider-bind9 ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/$(go env GOOS)_$(go env GOARCH)/
+mkdir -p ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/darwin_amd64/
+mv terraform-provider-bind9_v1.0.0 ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/darwin_amd64/terraform-provider-bind9
+chmod +x ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/darwin_amd64/terraform-provider-bind9
 ```
 
 #### Step 3: Configure Terraform
@@ -229,6 +235,22 @@ provider "bind9" {
 Then run:
 ```bash
 terraform init
+```
+
+---
+
+### Option 3: Build from Source
+
+If you have [Go 1.21+](https://go.dev/dl/) installed:
+
+```bash
+git clone https://github.com/harutyundermenjyan/terraform-provider-bind9.git
+cd terraform-provider-bind9
+go build -o terraform-provider-bind9
+
+# Install (auto-detects OS/arch)
+mkdir -p ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/$(go env GOOS)_$(go env GOARCH)/
+cp terraform-provider-bind9 ~/.terraform.d/plugins/github.com/harutyundermenjyan/bind9/1.0.0/$(go env GOOS)_$(go env GOARCH)/
 ```
 
 ---
