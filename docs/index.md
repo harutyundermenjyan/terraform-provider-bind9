@@ -265,6 +265,8 @@ No required arguments if using environment variables.
 | [Getting Started](guides/getting-started.md) | Quick start guide for new users |
 | [Multi-Server Setup](guides/multi-server.md) | Managing multiple BIND9 servers with provider aliases |
 | [Bulk Record Generation](guides/bulk-records.md) | Programmatic record generation (replaces $GENERATE) |
+| [Access Control (ACLs)](guides/access-control.md) | Configure allow_query, allow_transfer, allow_update |
+| [Ready-to-Use Templates](guides/templates.md) | Complete, copy-paste ready configurations |
 
 ## Resources
 

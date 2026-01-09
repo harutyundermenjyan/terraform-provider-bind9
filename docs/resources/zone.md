@@ -120,6 +120,108 @@ resource "bind9_zone" "reverse_ipv6" {
   default_ttl = 3600
 
   nameservers = ["ns1.example.com", "ns2.example.com"]
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+}
+```
+
+### Internal Zone with Named ACLs
+
+```terraform
+# References ACLs defined in /etc/bind/named.conf:
+# acl "internal" { 10.0.0.0/8; 172.16.0.0/12; 192.168.0.0/16; };
+# acl "trusted-secondaries" { 10.0.1.11; 10.0.1.12; };
+
+resource "bind9_zone" "internal" {
+  name = "internal.example.com"
+  type = "master"
+
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  default_ttl = 3600
+
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+
+  # Use named ACLs from named.conf
+  allow_query    = ["internal"]
+  allow_transfer = ["trusted-secondaries"]
+  allow_update   = ["key ddns-key"]
+  
+  notify = true
+}
+```
+
+### Production Zone (Maximum Security)
+
+```terraform
+resource "bind9_zone" "production" {
+  name = "prod.example.com"
+  type = "master"
+
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "security.example.com"
+  soa_refresh = 86400
+  soa_retry   = 7200
+  soa_expire  = 3600000
+  soa_minimum = 3600
+  default_ttl = 3600
+
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+
+  # Strict access control
+  allow_query    = ["internal"]
+  allow_transfer = ["key transfer-key"]  # TSIG only
+  allow_update   = ["none"]              # No dynamic updates
+  
+  notify = true
+  delete_file_on_destroy = false  # Safety for production
+}
+```
+
+### Zone with Multiple ACL Entries
+
+```terraform
+resource "bind9_zone" "mixed_acl" {
+  name = "example.com"
+  type = "master"
+
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  default_ttl = 3600
+
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+
+  allow_query = ["any"]
+  
+  # Multiple transfer sources
+  allow_transfer = [
+    "10.0.1.11",        # Secondary NS IP
+    "10.0.1.12",        # Another secondary
+    "key transfer-key", # TSIG authenticated
+  ]
+  
+  # Multiple update sources
+  allow_update = [
+    "10.0.2.5",         # DHCP server
+    "key ddns-key",     # Authenticated updates
+    "key dhcp-key",     # Another key
+  ]
+  
+  notify = true
 }
 ```
 
