@@ -305,4 +305,4 @@ terraform import bind9_record.www example.com/www/A
 
 ## License
 
-This provider is released under the MIT License.
+This provider is released under the Apache License 2.0.

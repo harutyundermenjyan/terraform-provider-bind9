@@ -1,6 +1,6 @@
 # Terraform Provider for BIND9
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![OpenTofu Registry](https://img.shields.io/badge/OpenTofu-Registry-blue.svg)](https://search.opentofu.org/provider/harutyundermenjyan/bind9)
 [![GitHub Release](https://img.shields.io/github/v/release/harutyundermenjyan/terraform-provider-bind9)](https://github.com/harutyundermenjyan/terraform-provider-bind9/releases)
 
@@ -1235,6 +1235,6 @@ cp terraform-provider-bind9 ~/.terraform.d/plugins/local/bind9/bind9/1.0.0/$(go 
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
 
-Copyright © 2024 Harutyun Dermenjyan
+Copyright © 2024-2026 Harutyun Dermenjyan
