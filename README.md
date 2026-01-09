@@ -1237,4 +1237,4 @@ cp terraform-provider-bind9 ~/.terraform.d/plugins/local/bind9/bind9/1.0.0/$(go 
 
 Apache License 2.0 - see [LICENSE](LICENSE) for details.
 
-Copyright © 2024-2026 Harutyun Dermenjyan
+Copyright © 2026 Harutyun Dermenjyan
