@@ -1,7 +1,8 @@
 # Terraform Provider for BIND9
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Terraform Registry](https://img.shields.io/badge/Terraform-Registry-purple.svg)](https://registry.terraform.io/providers/harutyundermenjyan/bind9/latest)
+[![OpenTofu Registry](https://img.shields.io/badge/OpenTofu-Registry-blue.svg)](https://search.opentofu.org/provider/harutyundermenjyan/bind9)
+[![GitHub Release](https://img.shields.io/github/v/release/harutyundermenjyan/terraform-provider-bind9)](https://github.com/harutyundermenjyan/terraform-provider-bind9/releases)
 
 A Terraform/OpenTofu provider for managing DNS zones and records on BIND9 servers via REST API.
 
@@ -104,8 +105,8 @@ Multiple independent BIND9 servers, each with its own API. Define records once, 
   - [Single Server](#architecture-1-single-server)
   - [Multi-Primary Servers](#architecture-2-multi-primary-servers)
 - [Installation](#installation)
-  - [Option 1: Terraform Registry (Coming Soon)](#option-1-terraform-registry-coming-soon)
-  - [Option 2: GitHub Releases ✅](#option-2-download-from-github-releases--currently-available)
+  - [Option 1: OpenTofu Registry ✅ (Recommended)](#option-1-opentofu-registry--recommended)
+  - [Option 2: GitHub Releases](#option-2-download-from-github-releases)
   - [Option 3: Build from Source](#option-3-build-from-source)
 - [Quick Start](#quick-start)
 - [Single Server Setup](#single-server-setup)
@@ -122,11 +123,9 @@ Multiple independent BIND9 servers, each with its own API. Define records once, 
 
 ## Installation
 
-### Option 1: Terraform Registry (Coming Soon)
+### Option 1: OpenTofu Registry ✅ (Recommended)
 
-> ⏳ **Not yet available.** This option will be available after the provider is published to the Terraform Registry.
-
-Once published, this will be the easiest way - no manual download required:
+The provider is available on the **OpenTofu Registry**. This is the easiest way - no manual download required!
 
 ```terraform
 terraform {
@@ -144,11 +143,21 @@ provider "bind9" {
 }
 ```
 
-Then simply run `terraform init` and Terraform will download the provider automatically.
+Then simply run:
+
+```bash
+tofu init    # OpenTofu
+# or
+terraform init  # Terraform
+```
+
+The provider will be downloaded automatically!
+
+> **Note:** The provider is published to the OpenTofu Registry. It works with both OpenTofu and Terraform.
 
 ---
 
-### Option 2: Download from GitHub Releases ✅ (Currently Available)
+### Option 2: Download from GitHub Releases
 
 Download pre-built binaries from GitHub releases.
 
@@ -973,7 +982,7 @@ terraform import bind9_record.mx "example.com/@/MX"
 
 ## Documentation
 
-Full documentation is available on the [Terraform Registry](https://registry.terraform.io/providers/harutyundermenjyan/bind9/latest/docs).
+Full documentation is available in the [docs](docs/) directory and on the [OpenTofu Registry](https://search.opentofu.org/provider/harutyundermenjyan/bind9).
 
 - [Getting Started](docs/guides/getting-started.md)
 - [Provider Configuration](docs/index.md)
