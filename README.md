@@ -879,6 +879,195 @@ output "ds_records" {
 
 ---
 
+## Zone Configuration & Access Control
+
+### Complete Zone Example with All Options
+
+```terraform
+resource "bind9_zone" "production" {
+  name = "example.com"
+  type = "master"
+
+  # ==========================================================================
+  # SOA Record Configuration
+  # ==========================================================================
+  soa_mname   = "ns1.example.com"      # Primary nameserver
+  soa_rname   = "hostmaster.example.com"  # Admin email (. instead of @)
+  soa_refresh = 3600                    # Secondary check interval (1 hour)
+  soa_retry   = 600                     # Retry after failed refresh (10 min)
+  soa_expire  = 604800                  # Stop serving if unreachable (1 week)
+  soa_minimum = 86400                   # Negative cache TTL (1 day)
+
+  # Default TTL for records
+  default_ttl = 3600
+
+  # ==========================================================================
+  # Nameservers & Glue Records
+  # ==========================================================================
+  nameservers = [
+    "ns1.example.com",
+    "ns2.example.com",
+  ]
+
+  # Glue records (required when nameservers are in-zone)
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+
+  # ==========================================================================
+  # Access Control Lists (ACLs)
+  # ==========================================================================
+  
+  # Who can query this zone
+  allow_query = ["any"]
+  
+  # Who can transfer this zone (AXFR/IXFR)
+  allow_transfer = [
+    "10.0.0.0/8",           # Internal network
+    "key transfer-key",      # TSIG authenticated
+  ]
+  
+  # Who can do dynamic DNS updates
+  allow_update = [
+    "key ddns-key",          # TSIG key authentication
+  ]
+
+  # ==========================================================================
+  # Zone Behavior
+  # ==========================================================================
+  notify = true                      # Notify slaves on changes
+  delete_file_on_destroy = false     # Don't delete zone file on destroy
+}
+```
+
+### Access Control Reference
+
+| Attribute | Purpose | Common Values |
+|-----------|---------|---------------|
+| `allow_query` | Who can query the zone | `["any"]`, `["10.0.0.0/8"]` |
+| `allow_transfer` | Who can do zone transfers | `["none"]`, `["10.0.0.0/8"]`, `["key transfer-key"]` |
+| `allow_update` | Who can do dynamic updates | `["none"]`, `["key ddns-key"]` |
+
+### ACL Value Formats
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| `any` | `["any"]` | Allow everyone |
+| `none` | `["none"]` | Deny everyone |
+| IP address | `["192.168.1.5"]` | Single host |
+| CIDR notation | `["10.0.0.0/8"]` | Network range |
+| TSIG key | `["key ddns-key"]` | Authenticated by TSIG key |
+| Named ACL | `["internal"]` | Reference ACL defined in named.conf |
+| localhost | `["localhost"]` | Local machine only |
+| localnets | `["localnets"]` | Local networks only |
+
+### Zone Types
+
+```terraform
+# Master Zone - You manage the data directly
+resource "bind9_zone" "master" {
+  name = "example.com"
+  type = "master"
+  # ... full configuration ...
+}
+
+# Slave Zone - Transfers from a master server
+resource "bind9_zone" "slave" {
+  name = "example.com"
+  type = "slave"
+  # Note: Master server configured in named.conf
+}
+
+# Forward Zone - Forwards queries to other servers
+resource "bind9_zone" "forward" {
+  name = "internal.example.com"
+  type = "forward"
+  # Note: Forwarders configured in named.conf
+}
+
+# Stub Zone - Only NS records, for delegation tracking
+resource "bind9_zone" "stub" {
+  name = "delegated.example.com"
+  type = "stub"
+}
+```
+
+### Reverse DNS Zones
+
+```terraform
+# IPv4 Reverse Zone (for 10.0.1.0/24)
+resource "bind9_zone" "reverse_ipv4" {
+  name = "1.0.10.in-addr.arpa"
+  type = "master"
+
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  default_ttl = 3600
+
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+  
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+
+  allow_query    = ["any"]
+  allow_transfer = ["10.0.0.0/8"]
+  allow_update   = ["key ddns-key"]
+}
+
+# PTR Record for 10.0.1.100 -> www.example.com
+resource "bind9_record" "ptr_www" {
+  zone    = bind9_zone.reverse_ipv4.name
+  name    = "100"      # Last octet of IP
+  type    = "PTR"
+  ttl     = 3600
+  records = ["www.example.com."]
+}
+```
+
+### SOA Parameter Guidelines
+
+| Parameter | Purpose | Recommended |
+|-----------|---------|-------------|
+| `soa_refresh` | How often secondaries check for updates | 3600-86400 (1h-1d) |
+| `soa_retry` | Retry interval after failed refresh | 600-7200 (10m-2h) |
+| `soa_expire` | When secondaries stop serving stale data | 604800-2419200 (1w-4w) |
+| `soa_minimum` | Negative cache TTL (NXDOMAIN) | 300-86400 (5m-1d) |
+
+### Security Best Practices
+
+```terraform
+# Production zone with strict access control
+resource "bind9_zone" "secure" {
+  name = "secure.example.com"
+  type = "master"
+
+  # ... SOA configuration ...
+
+  # Restrict queries to internal networks
+  allow_query = ["10.0.0.0/8", "192.168.0.0/16"]
+  
+  # Only allow transfers to known secondaries with TSIG
+  allow_transfer = [
+    "key transfer-key",
+    "10.0.1.11",  # Secondary NS IP
+  ]
+  
+  # Only allow updates via TSIG key
+  allow_update = ["key ddns-key"]
+  
+  # Notify secondaries
+  notify = true
+  
+  # Don't delete zone file on destroy
+  delete_file_on_destroy = false
+}
+```
+
+---
+
 ## Resources
 
 | Resource | Description |
