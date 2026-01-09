@@ -258,6 +258,14 @@ No required arguments if using environment variables.
 - `insecure` (Boolean) Skip TLS certificate verification. Default: `false`. Use only for testing.
 - `timeout` (Number) API request timeout in seconds. Default: `30`.
 
+## Guides
+
+| Guide | Description |
+|-------|-------------|
+| [Getting Started](guides/getting-started.md) | Quick start guide for new users |
+| [Multi-Server Setup](guides/multi-server.md) | Managing multiple BIND9 servers with provider aliases |
+| [Bulk Record Generation](guides/bulk-records.md) | Programmatic record generation (replaces $GENERATE) |
+
 ## Resources
 
 | Resource | Description |
@@ -293,8 +301,7 @@ terraform import bind9_record.www example.com/www/A
 
 | Project | Description |
 |---------|-------------|
-| [bind9-api](https://gitlab.com/Dermenjyan/bind9-api) | BIND9 REST API server that this provider communicates with |
-| [bind9-orchestrator](https://gitlab.com/Dermenjyan/bind9-orchestrator) | Example Terraform/OpenTofu configurations for managing BIND9 infrastructure |
+| [bind9-api](https://github.com/harutyundermenjyan/bind9-api) | BIND9 REST API server that this provider communicates with |
 
 ## Author
 
@@ -305,4 +312,4 @@ terraform import bind9_record.www example.com/www/A
 
 ## License
 
-This provider is released under the Apache License 2.0.
+Apache License 2.0 - Copyright © 2026 Harutyun Dermenjyan

@@ -13,7 +13,7 @@ This guide walks you through setting up the BIND9 provider and creating your fir
 
 Before you begin, you need:
 
-1. **BIND9 REST API** - A running instance of the [BIND9 REST API](https://gitlab.com/Dermenjyan/bind9-api)
+1. **BIND9 REST API** - A running instance of the [BIND9 REST API](https://github.com/harutyundermenjyan/bind9-api)
 2. **API Key** - An API key or credentials for authentication
 3. **Terraform/OpenTofu** - Version 1.0 or later
 
