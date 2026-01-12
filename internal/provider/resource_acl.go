@@ -222,14 +222,8 @@ func (r *ACLResource) Create(ctx context.Context, req resource.CreateRequest, re
 		"entries": entries,
 	})
 
-	// Create ACL
-	body, err := json.Marshal(aclReq)
-	if err != nil {
-		resp.Diagnostics.AddError("JSON Error", fmt.Sprintf("Failed to marshal ACL: %s", err))
-		return
-	}
-
-	httpResp, err := r.client.doRequest(ctx, "POST", "/api/v1/acls", body)
+	// Create ACL - pass struct directly, doRequest will marshal it
+	httpResp, err := r.client.doRequest(ctx, "POST", "/api/v1/acls", aclReq)
 	if err != nil {
 		resp.Diagnostics.AddError("API Error", fmt.Sprintf("Could not create ACL: %s", err))
 		return
@@ -368,14 +362,8 @@ func (r *ACLResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		"entries": entries,
 	})
 
-	// Update ACL
-	body, err := json.Marshal(updateReq)
-	if err != nil {
-		resp.Diagnostics.AddError("JSON Error", fmt.Sprintf("Failed to marshal update: %s", err))
-		return
-	}
-
-	httpResp, err := r.client.doRequest(ctx, "PUT", fmt.Sprintf("/api/v1/acls/%s", name), body)
+	// Update ACL - pass struct directly, doRequest will marshal it
+	httpResp, err := r.client.doRequest(ctx, "PUT", fmt.Sprintf("/api/v1/acls/%s", name), updateReq)
 	if err != nil {
 		resp.Diagnostics.AddError("API Error", fmt.Sprintf("Could not update ACL: %s", err))
 		return
