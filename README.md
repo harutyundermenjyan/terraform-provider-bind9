@@ -1234,6 +1234,55 @@ terraform import bind9_acl.internal internal
 
 ---
 
+## Troubleshooting
+
+### MX Record Creation Fails with "REFUSED"
+
+**Problem**: Creating an MX record fails with `update failed: REFUSED`
+
+**Cause**: BIND9 validates that MX record targets have A/AAAA records before allowing the MX record to be created.
+
+**Solution**: Always create the mail server A record BEFORE the MX record:
+
+```hcl
+# Mail server A record - MUST be created first
+resource "bind9_record" "mail" {
+  zone    = bind9_zone.main.name
+  name    = "mail"
+  type    = "A"
+  records = ["172.25.44.101"]
+}
+
+# MX record - depends on mail A record
+resource "bind9_record" "mx" {
+  zone    = bind9_zone.main.name
+  name    = "@"
+  type    = "MX"
+  records = ["10 mail.example.com."]
+  
+  depends_on = [bind9_record.mail]  # Required!
+}
+```
+
+### Record Deletion Fails During Destroy
+
+**Problem**: During `terraform destroy`, some records fail to delete with `REFUSED`
+
+**Cause**: When a zone and its records are destroyed simultaneously, the zone may be deleted first. BIND9 automatically removes all records when a zone is deleted, so subsequent record deletions fail.
+
+**Solution**: This is cosmetic - the server cleanup is complete. To finish:
+
+```bash
+# Run destroy again - it will complete
+tofu destroy
+
+# Or remove orphaned state manually
+tofu state rm bind9_record.problematic_record
+tofu destroy
+```
+
+---
+
 ## Documentation
 
 Full documentation is available in the [docs](docs/) directory and on the [OpenTofu Registry](https://search.opentofu.org/provider/harutyundermenjyan/bind9).

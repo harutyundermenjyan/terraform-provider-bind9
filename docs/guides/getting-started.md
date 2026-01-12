@@ -560,3 +560,54 @@ Error: In-zone nameserver requires an IP address in ns_addresses
 - Always use trailing dots for FQDNs in CNAME, MX, NS, PTR targets
 - Format MX records as "priority hostname" (e.g., "10 mail.example.com.")
 - Format SRV records as "priority weight port target"
+
+### MX Record Creation Fails with "REFUSED"
+
+```
+Error: Could not create record @ MX: API error 500: update failed: REFUSED
+```
+
+**Cause**: BIND9 validates that MX record targets have A/AAAA records before allowing the MX record to be created.
+
+**Solution**: Always create the mail server A record BEFORE the MX record using `depends_on`:
+
+```hcl
+# Mail server A record - MUST be created first
+resource "bind9_record" "mail" {
+  zone    = bind9_zone.main.name
+  name    = "mail"
+  type    = "A"
+  ttl     = 300
+  records = ["172.25.44.101"]
+}
+
+# MX record - depends on mail A record
+resource "bind9_record" "mx" {
+  zone    = bind9_zone.main.name
+  name    = "@"
+  type    = "MX"
+  ttl     = 3600
+  records = ["10 mail.example.com."]
+  
+  depends_on = [bind9_record.mail]  # Required!
+}
+```
+
+### Record Deletion Fails During Destroy
+
+```
+Error: Could not delete record: API error 500: update failed: REFUSED
+```
+
+**Cause**: During `terraform destroy`, if a zone and its records are destroyed simultaneously, the record deletion may fail because the zone was deleted first. BIND9 automatically removes all records when a zone is deleted.
+
+**Solution**: This is cosmetic - the server cleanup is complete. To finish the destroy:
+
+```bash
+# Option 1: Run destroy again
+tofu destroy
+
+# Option 2: Remove orphaned state entries manually
+tofu state rm bind9_record.problematic_record
+tofu destroy
+```
