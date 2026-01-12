@@ -203,6 +203,7 @@ func (p *Bind9Provider) Resources(ctx context.Context) []func() resource.Resourc
 		NewZoneResource,
 		NewRecordResource,
 		NewDNSSECKeyResource,
+		NewACLResource,
 	}
 }
 
