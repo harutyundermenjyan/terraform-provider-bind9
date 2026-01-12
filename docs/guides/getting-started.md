@@ -117,17 +117,40 @@ controls {
 };
 ```
 
-Set up permissions for ACL management (for `bind9_acl` resource):
+#### ACL File Setup (for `bind9_acl` resource)
+
+The `bind9_acl` resource manages ACLs in a dedicated file (`/etc/bind/named.conf.acls`).
+
+**Setup Steps:**
 
 ```bash
-# Allow the API to create/manage the ACL file
-chmod g+w /etc/bind
+# 1. Allow the API to create/manage the ACL file
+sudo chmod g+w /etc/bind
 
-# The API will automatically create /etc/bind/named.conf.acls
-# when the first ACL is created via Terraform
+# 2. The API automatically creates the ACL file on startup
+#    OR you can create it manually:
+sudo bash -c 'cat > /etc/bind/named.conf.acls << EOF
+// BIND9 Access Control Lists
+// Managed by bind9-api - DO NOT EDIT MANUALLY
+
+EOF'
+
+sudo chown bind:bind /etc/bind/named.conf.acls
+sudo chmod 664 /etc/bind/named.conf.acls
+
+# 3. Verify BIND9 config is valid
+sudo named-checkconf && sudo rndc reload
 ```
 
-> **Note:** The `bind9_acl` resource will automatically create the ACL file if it doesn't exist. The `/etc/bind` directory must be group-writable by the `bind` group for this to work.
+**How it works:**
+
+| Event | ACL File State |
+|-------|----------------|
+| **API startup** | Creates empty file with header if missing |
+| **First ACL created** | ACL added to file |
+| **All ACLs destroyed** | File kept with header only (BIND9 won't fail) |
+
+> **Important:** The include statement in `named.conf` must be added manually (Step 4). The API never modifies `named.conf` for security.
 
 #### Step 5: Install BIND9 REST API
 
@@ -595,5 +618,67 @@ resource "bind9_record" "mx" {
   
   depends_on = [bind9_record.mail]  # Required!
 }
+```
+
+---
+
+## Lifecycle Behavior
+
+Understanding what happens when you apply and destroy resources.
+
+### On `terraform apply`
+
+| Resource | Action |
+|----------|--------|
+| `bind9_acl` | ACL added to `/etc/bind/named.conf.acls`, BIND9 reloaded |
+| `bind9_zone` | Zone created via `rndc addzone`, zone file written to `/var/lib/bind/` |
+| `bind9_record` | Record added to zone via `nsupdate` |
+
+### On `terraform destroy`
+
+| Resource | Action | Files on Disk |
+|----------|--------|---------------|
+| `bind9_acl` | ACL removed from file | ACL file kept (with header only) |
+| `bind9_zone` | Zone removed via `rndc delzone` | Zone file **kept** by default |
+| `bind9_record` | Record deleted via `nsupdate` | N/A (part of zone file) |
+
+### Zone File Behavior
+
+By default, zone files are **not deleted** when zones are destroyed. This is a safety feature.
+
+To delete zone files on destroy:
+
+```hcl
+resource "bind9_zone" "example" {
+  name = "example.com"
+  type = "master"
+  
+  # Delete zone file when zone is destroyed
+  delete_file_on_destroy = true
+  
+  # ... other settings
+}
+```
+
+### ACL File Behavior
+
+The ACL file (`/etc/bind/named.conf.acls`) is **never deleted** by the provider:
+
+- When all ACLs are destroyed, the file is emptied (header only remains)
+- This prevents BIND9 config errors from a missing include file
+- BIND9 can safely reload even with an empty ACL file
+
+### Best Practice for Clean Slate
+
+If you want to completely reset:
+
+```bash
+# 1. Terraform destroy
+tofu destroy
+
+# 2. Manually clean zone files (optional)
+sudo rm /var/lib/bind/db.your-zone.*
+
+# 3. ACL file is already empty (just header) - no action needed
 ```
 
