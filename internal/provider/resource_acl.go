@@ -167,8 +167,9 @@ resource "bind9_zone" "example" {
 				ElementType: types.StringType,
 			},
 			"comment": schema.StringAttribute{
-				Description: "Optional description/comment for the ACL",
+				Description: "Optional description/comment for the ACL. Server may append a timestamp.",
 				Optional:    true,
+				Computed:    true,
 			},
 		},
 	}
