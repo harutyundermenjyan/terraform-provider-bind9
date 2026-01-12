@@ -1264,23 +1264,6 @@ resource "bind9_record" "mx" {
 }
 ```
 
-### Record Deletion Fails During Destroy
-
-**Problem**: During `terraform destroy`, some records fail to delete with `REFUSED`
-
-**Cause**: When a zone and its records are destroyed simultaneously, the zone may be deleted first. BIND9 automatically removes all records when a zone is deleted, so subsequent record deletions fail.
-
-**Solution**: This is cosmetic - the server cleanup is complete. To finish:
-
-```bash
-# Run destroy again - it will complete
-tofu destroy
-
-# Or remove orphaned state manually
-tofu state rm bind9_record.problematic_record
-tofu destroy
-```
-
 ---
 
 ## Documentation

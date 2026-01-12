@@ -593,21 +593,3 @@ resource "bind9_record" "mx" {
 }
 ```
 
-### Record Deletion Fails During Destroy
-
-```
-Error: Could not delete record: API error 500: update failed: REFUSED
-```
-
-**Cause**: During `terraform destroy`, if a zone and its records are destroyed simultaneously, the record deletion may fail because the zone was deleted first. BIND9 automatically removes all records when a zone is deleted.
-
-**Solution**: This is cosmetic - the server cleanup is complete. To finish the destroy:
-
-```bash
-# Option 1: Run destroy again
-tofu destroy
-
-# Option 2: Remove orphaned state entries manually
-tofu state rm bind9_record.problematic_record
-tofu destroy
-```
