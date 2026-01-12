@@ -12,6 +12,7 @@ The BIND9 provider allows you to manage DNS zones and records on a BIND9 server 
 
 - **Zone Management** - Create, update, and delete DNS zones (master, slave, forward, stub)
 - **Record Management** - Full CRUD support for all common DNS record types
+- **ACL Management** - Manage Access Control Lists as code for reusable access policies
 - **DNSSEC Support** - Generate and manage DNSSEC keys (KSK, ZSK, CSK)
 - **Data Sources** - Query existing zones and records
 - **Import Support** - Import existing resources into Terraform state
@@ -45,31 +46,74 @@ The BIND9 provider allows you to manage DNS zones and records on a BIND9 server 
 
 ~> **Important:** This provider requires the **BIND9 REST API** to be installed on your BIND9 server(s).
 
-### Required: BIND9 REST API
-
-This provider communicates with BIND9 through a REST API - it does NOT connect directly to BIND9.
-
-**You must install the BIND9 REST API first:**
+### Required Components
 
 | Component | Repository | Description |
 |-----------|------------|-------------|
-| **BIND9 REST API** | [github.com/harutyundermenjyan/bind9-api](https://github.com/harutyundermenjyan/bind9-api) | REST API server that runs on each BIND9 server |
+| **BIND9** | System package | DNS server (9.x) |
+| **BIND9 REST API** | [github.com/harutyundermenjyan/bind9-api](https://github.com/harutyundermenjyan/bind9-api) | REST API that this provider communicates with |
 
 ### Architecture
 
 ```
 ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
 │   Terraform/    │──────▶│   BIND9 REST    │──────▶│     BIND9       │
-│   OpenTofu      │ HTTPS │      API        │ rndc  │     Server      │
+│   OpenTofu      │ HTTP  │      API        │ rndc  │     Server      │
 └─────────────────┘       └─────────────────┘       └─────────────────┘
-     (this provider)      (required component)       (DNS server)
+     (this provider)          (:8080)               (DNS on :53)
 ```
 
-### Checklist
+### BIND9 Server Configuration
 
-1. **BIND9 REST API** - Install and configure on each BIND9 server ([Installation Guide](https://github.com/harutyundermenjyan/bind9-api#quick-start))
-2. **Authentication** - Generate an API key during API setup
-3. **Network Access** - Ensure Terraform can reach the API endpoint (default port: 8080)
+Your BIND9 server needs these configuration files:
+
+| File | Purpose | Owner | Permissions |
+|------|---------|-------|-------------|
+| `/etc/bind/named.conf` | Main config with includes | `root:bind` | `644` |
+| `/etc/bind/named.conf.acls` | ACL definitions (API-managed) | `bind:bind` | `664` |
+| `/etc/bind/rndc.key` | RNDC authentication | `bind:bind` | `640` |
+| `/etc/bind/keys/ddns-key.key` | TSIG key for updates | `bind:bind` | `640` |
+| `/var/lib/bind/` | Zone files directory | `bind:bind` | `755` |
+
+**Critical `/etc/bind/named.conf` includes:**
+
+```bind
+// Include keys first
+include "/etc/bind/rndc.key";
+include "/etc/bind/keys/ddns-key.key";
+
+// Include API-managed ACLs (required for bind9_acl resource)
+include "/etc/bind/named.conf.acls";
+
+// Other includes...
+include "/etc/bind/named.conf.options";
+include "/etc/bind/named.conf.local";
+```
+
+**Critical `/etc/bind/named.conf.options` settings:**
+
+```bind
+options {
+    // REQUIRED: Allow API to create/delete zones dynamically
+    allow-new-zones yes;
+    
+    // ... other options ...
+};
+```
+
+### Setup Checklist
+
+1. ✅ **BIND9 installed** with `rndc` and `nsupdate`
+2. ✅ **RNDC key** generated at `/etc/bind/rndc.key`
+3. ✅ **TSIG key** generated at `/etc/bind/keys/ddns-key.key`
+4. ✅ **ACL file** created at `/etc/bind/named.conf.acls` with correct permissions
+5. ✅ **named.conf** includes the ACL file
+6. ✅ **allow-new-zones yes** in named.conf.options
+7. ✅ **BIND9 REST API** installed and running
+8. ✅ **API key** generated for authentication
+9. ✅ **Network access** from Terraform to API endpoint (default port: 8080)
+
+> **Full Setup Guide:** See the [Getting Started Guide](guides/getting-started.md) or the [BIND9 REST API Setup Guide](https://github.com/harutyundermenjyan/bind9-api/blob/main/SETUP.md) for complete instructions.
 
 ## Example Usage
 
@@ -179,6 +223,56 @@ resource "bind9_zone" "secondary" {
 }
 ```
 
+### Using Access Control Lists (ACLs)
+
+```terraform
+# Define reusable ACLs
+resource "bind9_acl" "internal" {
+  name    = "internal"
+  entries = ["localhost", "localnets", "10.0.0.0/8", "172.16.0.0/12"]
+  comment = "Internal networks"
+}
+
+resource "bind9_acl" "secondaries" {
+  name    = "secondaries"
+  entries = ["10.0.1.11", "10.0.1.12", "key \"transfer-key\""]
+  comment = "Secondary DNS servers"
+}
+
+resource "bind9_acl" "ddns_clients" {
+  name    = "ddns-clients"
+  entries = ["10.0.2.0/24", "key \"ddns-key\""]
+  comment = "Dynamic DNS update clients"
+}
+
+# Use ACLs in zone configuration
+resource "bind9_zone" "example" {
+  name = "example.com"
+  type = "master"
+  
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  default_ttl = 3600
+  
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+  
+  # Reference ACLs by name
+  allow_query    = ["internal", "any"]
+  allow_transfer = ["secondaries"]
+  allow_update   = ["ddns-clients"]
+  
+  depends_on = [
+    bind9_acl.internal,
+    bind9_acl.secondaries,
+    bind9_acl.ddns_clients,
+  ]
+}
+```
+
 ### Complete Zone with DNSSEC
 
 ```terraform
@@ -274,6 +368,7 @@ No required arguments if using environment variables.
 |----------|-------------|
 | [bind9_zone](resources/zone.md) | Manages a DNS zone on BIND9 server |
 | [bind9_record](resources/record.md) | Manages DNS records on BIND9 server |
+| [bind9_acl](resources/acl.md) | Manages Access Control Lists (ACLs) for reusable access policies |
 | [bind9_dnssec_key](resources/dnssec_key.md) | Manages DNSSEC keys for zones |
 
 ## Data Sources

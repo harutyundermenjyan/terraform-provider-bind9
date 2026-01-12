@@ -13,9 +13,225 @@ This guide walks you through setting up the BIND9 provider and creating your fir
 
 Before you begin, you need:
 
-1. **BIND9 REST API** - A running instance of the [BIND9 REST API](https://github.com/harutyundermenjyan/bind9-api)
-2. **API Key** - An API key or credentials for authentication
-3. **Terraform/OpenTofu** - Version 1.0 or later
+1. **BIND9 Server** with the **BIND9 REST API** installed
+2. **API Key** for authentication
+3. **Terraform/OpenTofu** version 1.0 or later
+
+> **Important:** This provider requires the [BIND9 REST API](https://github.com/harutyundermenjyan/bind9-api) to be installed and configured on your BIND9 server. See the [BIND9 Server Setup](#bind9-server-setup) section below.
+
+---
+
+## BIND9 Server Setup
+
+### Required Components
+
+| Component | Repository | Description |
+|-----------|------------|-------------|
+| **BIND9** | System package | DNS server |
+| **BIND9 REST API** | [github.com/harutyundermenjyan/bind9-api](https://github.com/harutyundermenjyan/bind9-api) | REST API that this provider communicates with |
+
+### Architecture
+
+```
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│   Terraform/    │──────▶│   BIND9 REST    │──────▶│     BIND9       │
+│   OpenTofu      │ HTTP  │      API        │ rndc  │     Server      │
+└─────────────────┘       └─────────────────┘       └─────────────────┘
+     (this provider)        (:8080)               (DNS on :53)
+```
+
+### Quick Setup (Ubuntu/Debian)
+
+#### Step 1: Install BIND9
+
+```bash
+apt update
+apt install -y bind9 bind9utils
+```
+
+#### Step 2: Create Required Directories
+
+```bash
+mkdir -p /etc/bind/keys
+mkdir -p /var/lib/bind
+mkdir -p /var/log/bind
+
+chown -R bind:bind /etc/bind/keys /var/lib/bind /var/log/bind
+```
+
+#### Step 3: Generate RNDC and TSIG Keys
+
+```bash
+# RNDC key for server control
+rndc-confgen -a -k rndc-key -c /etc/bind/rndc.key
+chown bind:bind /etc/bind/rndc.key
+chmod 640 /etc/bind/rndc.key
+
+# TSIG key for dynamic DNS updates
+tsig-keygen -a hmac-sha256 ddns-key > /etc/bind/keys/ddns-key.key
+chown bind:bind /etc/bind/keys/ddns-key.key
+chmod 640 /etc/bind/keys/ddns-key.key
+```
+
+#### Step 4: Configure BIND9
+
+Edit `/etc/bind/named.conf`:
+
+```bind
+// Include keys first
+include "/etc/bind/rndc.key";
+include "/etc/bind/keys/ddns-key.key";
+
+// Include API-managed ACLs (for bind9_acl resource)
+include "/etc/bind/named.conf.acls";
+
+// Then includes
+include "/etc/bind/named.conf.options";
+include "/etc/bind/named.conf.local";
+include "/etc/bind/named.conf.default-zones";
+```
+
+Edit `/etc/bind/named.conf.options`:
+
+```bind
+options {
+    directory "/var/cache/bind";
+
+    allow-query { any; };
+    dnssec-validation auto;
+    listen-on { any; };
+    listen-on-v6 { any; };
+
+    // CRITICAL: Required for API zone management
+    allow-new-zones yes;
+};
+
+// Statistics channel for API
+statistics-channels {
+    inet 127.0.0.1 port 8053 allow { 127.0.0.1; };
+};
+
+// RNDC control
+controls {
+    inet 127.0.0.1 port 953 allow { 127.0.0.1; } keys { "rndc-key"; };
+};
+```
+
+Create the ACL file (for `bind9_acl` resource):
+
+```bash
+touch /etc/bind/named.conf.acls
+chown bind:bind /etc/bind/named.conf.acls
+chmod 664 /etc/bind/named.conf.acls
+```
+
+#### Step 5: Install BIND9 REST API
+
+```bash
+cd /opt
+git clone https://github.com/harutyundermenjyan/bind9-api.git
+cd bind9-api
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Generate API key
+python3 -c "import secrets; print('API_KEY:', secrets.token_urlsafe(32))"
+# SAVE THIS KEY - you'll need it for Terraform!
+```
+
+#### Step 6: Configure API
+
+Create `/opt/bind9-api/.env`:
+
+```bash
+# API Server
+BIND9_API_HOST=0.0.0.0
+BIND9_API_PORT=8080
+
+# Authentication
+BIND9_API_AUTH_ENABLED=true
+BIND9_API_AUTH_STATIC_API_KEY=<your-generated-api-key>
+BIND9_API_AUTH_STATIC_API_KEY_SCOPES=read,write,admin,dnssec,stats
+
+# Database disabled (using static API key)
+BIND9_API_DATABASE_ENABLED=false
+
+# BIND9 Paths
+BIND9_API_BIND9_CONFIG_PATH=/etc/bind/named.conf
+BIND9_API_BIND9_ZONES_PATH=/var/lib/bind
+BIND9_API_BIND9_KEYS_PATH=/etc/bind/keys
+BIND9_API_BIND9_RNDC_KEY=/etc/bind/rndc.key
+BIND9_API_BIND9_ACLS_PATH=/etc/bind/named.conf.acls
+BIND9_API_BIND9_NAMED_CHECKZONE=/usr/bin/named-checkzone
+BIND9_API_BIND9_NAMED_CHECKCONF=/usr/bin/named-checkconf
+
+# TSIG Key (from /etc/bind/keys/ddns-key.key)
+BIND9_API_TSIG_KEY_FILE=/etc/bind/keys/ddns-key.key
+BIND9_API_TSIG_KEY_NAME=ddns-key
+BIND9_API_TSIG_KEY_SECRET=<secret-from-ddns-key.key>
+BIND9_API_TSIG_KEY_ALGORITHM=hmac-sha256
+
+# Misc
+BIND9_API_LOG_LEVEL=INFO
+```
+
+#### Step 7: Create Systemd Service
+
+Create `/etc/systemd/system/bind9-api.service`:
+
+```ini
+[Unit]
+Description=BIND9 REST API
+After=network.target named.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/bind9-api
+EnvironmentFile=/opt/bind9-api/.env
+ExecStart=/opt/bind9-api/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable bind9-api
+systemctl start bind9-api
+```
+
+#### Step 8: Verify Setup
+
+```bash
+# Check BIND9
+rndc status
+
+# Check API
+curl http://localhost:8080/health
+
+# Test authentication
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8080/api/v1/zones
+```
+
+### File Permissions Reference
+
+| File | Owner | Permissions | Purpose |
+|------|-------|-------------|---------|
+| `/etc/bind/named.conf` | `root:bind` | `644` | Main BIND9 config |
+| `/etc/bind/named.conf.acls` | `bind:bind` | `664` | API-managed ACLs |
+| `/etc/bind/rndc.key` | `bind:bind` | `640` | RNDC authentication |
+| `/etc/bind/keys/ddns-key.key` | `bind:bind` | `640` | TSIG key for updates |
+| `/var/lib/bind/` | `bind:bind` | `755` | Zone files directory |
+| `/opt/bind9-api/.env` | `root:root` | `600` | API configuration |
+
+> **Full Setup Guide:** See the [BIND9 REST API Setup Guide](https://github.com/harutyundermenjyan/bind9-api/blob/main/SETUP.md) for complete instructions including HTTPS, AppArmor, and troubleshooting.
+
+---
 
 ## Step 1: Configure the Provider
 

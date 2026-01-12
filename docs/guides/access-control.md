@@ -131,9 +131,104 @@ resource "bind9_zone" "secure" {
 
 ## Using Named ACLs
 
-You can reference named ACLs defined in your BIND9 `named.conf`:
+Named ACLs let you define reusable access policies. You can either:
 
-### Step 1: Define ACLs in named.conf
+1. **Use `bind9_acl` resource** (recommended) - Manage ACLs as code
+2. **Define in named.conf** (legacy) - Manual configuration on server
+
+### Option 1: Using bind9_acl Resource (Recommended)
+
+Manage ACLs directly with Terraform:
+
+```terraform
+# =============================================================================
+# Define ACLs using bind9_acl resource
+# =============================================================================
+
+resource "bind9_acl" "internal" {
+  name = "internal"
+  
+  entries = [
+    "localhost",
+    "localnets",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+  ]
+  
+  comment = "RFC1918 private networks"
+}
+
+resource "bind9_acl" "trusted_secondaries" {
+  name = "trusted-secondaries"
+  
+  entries = [
+    "10.0.1.11",              # ns2
+    "10.0.1.12",              # ns3
+    "key \"transfer-key\"",   # TSIG authenticated
+  ]
+  
+  comment = "Secondary DNS servers for zone transfers"
+}
+
+resource "bind9_acl" "ddns_clients" {
+  name = "ddns-clients"
+  
+  entries = [
+    "10.0.2.0/24",            # DHCP server network
+    "key \"ddns-key\"",       # TSIG key
+  ]
+  
+  comment = "Hosts allowed for dynamic DNS updates"
+}
+
+resource "bind9_acl" "dmz" {
+  name = "dmz"
+  
+  entries = [
+    "10.0.100.0/24",
+  ]
+  
+  comment = "DMZ network segment"
+}
+
+# =============================================================================
+# Use ACLs in zone configuration
+# =============================================================================
+
+resource "bind9_zone" "using_acls" {
+  name = "example.com"
+  type = "master"
+
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  default_ttl = 3600
+
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+
+  # Reference ACLs by name
+  allow_query    = ["internal"]
+  allow_transfer = ["trusted-secondaries"]
+  allow_update   = ["ddns-clients"]
+  
+  notify = true
+
+  # IMPORTANT: Ensure ACLs are created before the zone
+  depends_on = [
+    bind9_acl.internal,
+    bind9_acl.trusted_secondaries,
+    bind9_acl.ddns_clients,
+  ]
+}
+```
+
+### Option 2: Define in named.conf (Legacy)
+
+If you prefer to manually manage ACLs on the server:
 
 ```bind
 // /etc/bind/named.conf or /etc/bind/named.conf.options
@@ -162,7 +257,7 @@ acl "dmz" {
 };
 ```
 
-### Step 2: Reference ACLs in Terraform
+Then reference in Terraform:
 
 ```terraform
 resource "bind9_zone" "using_named_acls" {
@@ -179,18 +274,24 @@ resource "bind9_zone" "using_named_acls" {
     "ns2.example.com" = "10.0.1.11"
   }
 
-  # Use named ACL from named.conf
-  allow_query = ["internal"]
-  
-  # Use named ACL for zone transfers
+  # Reference named ACLs from named.conf
+  allow_query    = ["internal"]
   allow_transfer = ["trusted-secondaries"]
-  
-  # Use named ACL for dynamic updates
-  allow_update = ["ddns-clients"]
+  allow_update   = ["ddns-clients"]
   
   notify = true
 }
 ```
+
+### Why Use bind9_acl Resource?
+
+| Feature | bind9_acl Resource | Manual named.conf |
+|---------|-------------------|-------------------|
+| Version control | ✅ Tracked in Git | ❌ Manual |
+| Consistency | ✅ Same for all servers | ❌ May drift |
+| Auditability | ✅ Terraform state | ❌ Server logs only |
+| Easy updates | ✅ `terraform apply` | ❌ Edit files, reload |
+| Dependencies | ✅ `depends_on` works | ❌ Manual ordering |
 
 ## Advanced ACL Patterns
 

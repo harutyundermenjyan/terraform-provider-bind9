@@ -222,9 +222,15 @@ resource "bind9_zone" "example_secondary" {
 
 ## Record Configuration with Multi-Server Deployment
 
-### The `servers = []` Pattern
+### The `servers` Pattern
 
-Define records once, deploy to selected servers:
+Define records once, deploy to selected servers using the `servers` attribute:
+
+| `servers` Value | Behavior |
+|-----------------|----------|
+| `[]` (empty) | Deploy to **ALL** enabled servers |
+| `["dns1"]` | Deploy to **dns1 only** |
+| `["dns1", "dns2"]` | Deploy to **dns1 and dns2** |
 
 ```terraform
 # locals.tf
@@ -237,26 +243,61 @@ locals {
 
   # Define records with server targeting
   example_records = {
+    # Public records → ALL servers
     "www_A" = {
       name    = "www"
       type    = "A"
       ttl     = 300
       records = ["10.0.1.100"]
-      servers = []  # Empty = deploy to ALL enabled servers
+      servers = []              # ALL enabled servers
     }
+    "mail_A" = {
+      name    = "mail"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.1.50"]
+      servers = []              # ALL enabled servers
+    }
+    "mx_MX" = {
+      name    = "@"
+      type    = "MX"
+      ttl     = 3600
+      records = ["10 mail.example.com."]
+      servers = []              # ALL enabled servers
+    }
+    
+    # Internal records → dns1 only
+    "db_A" = {
+      name    = "db"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.1.102"]
+      servers = ["dns1"]        # dns1 only
+    }
+    "ldap_A" = {
+      name    = "ldap"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.1.103"]
+      servers = ["dns1"]        # dns1 only
+    }
+    
+    # Staging records → dns2 only
+    "staging_A" = {
+      name    = "staging"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.1.200"]
+      servers = ["dns2"]        # dns2 only
+    }
+    
+    # Specific servers → dns1 and dns3
     "api_A" = {
       name    = "api"
       type    = "A"
       ttl     = 300
       records = ["10.0.1.101"]
-      servers = ["dns1"]  # Deploy only to dns1
-    }
-    "internal_A" = {
-      name    = "internal"
-      type    = "A"
-      ttl     = 300
-      records = ["10.0.1.102"]
-      servers = ["dns1", "dns2"]  # Deploy to dns1 and dns2 only
+      servers = ["dns1", "dns3"]  # dns1 and dns3 only
     }
   }
 
@@ -344,6 +385,108 @@ locals {
 }
 ```
 
+## ACL Management on Multiple Servers
+
+Deploy ACLs to each server to enable zone access control references.
+
+### ACL Configuration per Server
+
+```terraform
+# =============================================================================
+# acls.tf - ACLs for each server
+# =============================================================================
+
+# ACLs for dns1
+resource "bind9_acl" "internal_dns1" {
+  count    = try(var.servers["dns1"].enabled, false) ? 1 : 0
+  provider = bind9.dns1
+
+  name    = "internal"
+  entries = ["localhost", "localnets", "10.0.0.0/8", "172.16.0.0/12"]
+  comment = "Internal networks"
+}
+
+resource "bind9_acl" "secondaries_dns1" {
+  count    = try(var.servers["dns1"].enabled, false) ? 1 : 0
+  provider = bind9.dns1
+
+  name    = "secondaries"
+  entries = ["10.0.1.11", "10.0.1.12", "key \"transfer-key\""]
+  comment = "Secondary DNS servers"
+}
+
+resource "bind9_acl" "ddns_dns1" {
+  count    = try(var.servers["dns1"].enabled, false) ? 1 : 0
+  provider = bind9.dns1
+
+  name    = "ddns-clients"
+  entries = ["10.0.2.0/24", "key \"ddns-key\""]
+  comment = "Dynamic DNS clients"
+}
+
+# ACLs for dns2
+resource "bind9_acl" "internal_dns2" {
+  count    = try(var.servers["dns2"].enabled, false) ? 1 : 0
+  provider = bind9.dns2
+
+  name    = "internal"
+  entries = ["localhost", "localnets", "10.0.0.0/8", "172.16.0.0/12"]
+  comment = "Internal networks"
+}
+
+resource "bind9_acl" "secondaries_dns2" {
+  count    = try(var.servers["dns2"].enabled, false) ? 1 : 0
+  provider = bind9.dns2
+
+  name    = "secondaries"
+  entries = ["10.0.1.10", "10.0.1.12", "key \"transfer-key\""]  # Different for dns2
+  comment = "Secondary DNS servers"
+}
+
+resource "bind9_acl" "ddns_dns2" {
+  count    = try(var.servers["dns2"].enabled, false) ? 1 : 0
+  provider = bind9.dns2
+
+  name    = "ddns-clients"
+  entries = ["10.0.2.0/24", "key \"ddns-key\""]
+  comment = "Dynamic DNS clients"
+}
+```
+
+### Using ACLs in Zone Configuration
+
+```terraform
+# zones.tf
+resource "bind9_zone" "example_dns1" {
+  count    = try(var.servers["dns1"].enabled, false) ? 1 : 0
+  provider = bind9.dns1
+
+  name        = "example.com"
+  type        = "master"
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  default_ttl = 3600
+
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+
+  # Reference ACLs by name
+  allow_query    = ["internal", "any"]
+  allow_transfer = ["secondaries"]
+  allow_update   = ["ddns-clients"]
+
+  # Ensure ACLs are created first
+  depends_on = [
+    bind9_acl.internal_dns1,
+    bind9_acl.secondaries_dns1,
+    bind9_acl.ddns_dns1,
+  ]
+}
+```
+
 ## Complete Example: File Structure
 
 ```
@@ -351,6 +494,7 @@ project/
 ├── providers.tf      # Provider configuration with aliases
 ├── variables.tf      # Server variable definitions
 ├── terraform.tfvars  # Server endpoints and API keys (gitignored)
+├── acls.tf           # ACL resources for each server
 ├── locals.tf         # Record definitions and expansion logic
 ├── zones.tf          # Zone resources for each server
 ├── records.tf        # Record resources using for_each

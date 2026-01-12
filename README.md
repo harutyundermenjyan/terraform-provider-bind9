@@ -91,6 +91,7 @@ Multiple independent BIND9 servers, each with its own API. Define records once, 
 
 - **Zone Management** - Create, read, update, delete DNS zones (master, slave, forward, stub)
 - **Record Management** - Full CRUD for 20+ record types (A, AAAA, CNAME, MX, TXT, SRV, CAA, PTR, etc.)
+- **ACL Management** - Manage Access Control Lists as code for reusable access policies
 - **DNSSEC Support** - Generate and manage DNSSEC keys (KSK, ZSK, CSK)
 - **Data Sources** - Query existing zones and records
 - **Import Support** - Import existing resources into Terraform state
@@ -1068,12 +1069,73 @@ resource "bind9_zone" "secure" {
 
 ---
 
+## Access Control Lists (ACLs)
+
+Define reusable access policies that can be referenced by name in zone configurations.
+
+### Basic ACL Example
+
+```terraform
+# Define ACLs
+resource "bind9_acl" "internal" {
+  name    = "internal"
+  entries = ["localhost", "localnets", "10.0.0.0/8", "172.16.0.0/12"]
+  comment = "Internal networks"
+}
+
+resource "bind9_acl" "secondaries" {
+  name    = "secondaries"
+  entries = ["10.0.1.11", "10.0.1.12", "key \"transfer-key\""]
+  comment = "Secondary DNS servers"
+}
+
+resource "bind9_acl" "ddns_clients" {
+  name    = "ddns-clients"
+  entries = ["10.0.2.0/24", "key \"ddns-key\""]
+  comment = "Dynamic DNS update clients"
+}
+
+# Use ACLs in zone configuration
+resource "bind9_zone" "example" {
+  name = "example.com"
+  type = "master"
+  
+  # ... SOA and nameserver configuration ...
+  
+  # Reference ACLs by name instead of repeating IP lists
+  allow_query    = ["internal", "any"]
+  allow_transfer = ["secondaries"]
+  allow_update   = ["ddns-clients"]
+  
+  depends_on = [
+    bind9_acl.internal,
+    bind9_acl.secondaries,
+    bind9_acl.ddns_clients,
+  ]
+}
+```
+
+### ACL Entry Formats
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| `localhost` | `"localhost"` | Local machine |
+| `localnets` | `"localnets"` | All local networks |
+| IP address | `"192.168.1.5"` | Single host |
+| CIDR network | `"10.0.0.0/8"` | Network range |
+| TSIG key | `"key \"keyname\""` | TSIG key authentication |
+| `any` | `"any"` | Any host |
+| `none` | `"none"` | No hosts |
+
+---
+
 ## Resources
 
 | Resource | Description |
 |----------|-------------|
 | [`bind9_zone`](docs/resources/zone.md) | Manages DNS zones (master, slave, forward, stub) |
 | [`bind9_record`](docs/resources/record.md) | Manages DNS records (A, AAAA, CNAME, MX, TXT, etc.) |
+| [`bind9_acl`](docs/resources/acl.md) | Manages Access Control Lists (ACLs) for reusable access policies |
 | [`bind9_dnssec_key`](docs/resources/dnssec_key.md) | Manages DNSSEC keys (KSK, ZSK, CSK) |
 
 ## Data Sources
@@ -1164,6 +1226,9 @@ terraform import bind9_zone.example example.com
 terraform import bind9_record.www example.com/www/A
 terraform import bind9_record.mx "example.com/@/MX"
 
+# Import an ACL by name
+terraform import bind9_acl.internal internal
+
 # DNSSEC keys cannot be imported (security reasons)
 ```
 
@@ -1173,11 +1238,20 @@ terraform import bind9_record.mx "example.com/@/MX"
 
 Full documentation is available in the [docs](docs/) directory and on the [OpenTofu Registry](https://search.opentofu.org/provider/harutyundermenjyan/bind9).
 
+**Guides:**
 - [Getting Started](docs/guides/getting-started.md)
-- [Provider Configuration](docs/index.md)
+- [Multi-Server Setup](docs/guides/multi-server.md)
+- [Access Control (ACLs)](docs/guides/access-control.md)
+- [Bulk Records](docs/guides/bulk-records.md)
+- [Ready-to-Use Templates](docs/guides/templates.md)
+
+**Resources:**
 - [bind9_zone Resource](docs/resources/zone.md)
 - [bind9_record Resource](docs/resources/record.md)
+- [bind9_acl Resource](docs/resources/acl.md)
 - [bind9_dnssec_key Resource](docs/resources/dnssec_key.md)
+
+**Data Sources:**
 - [bind9_zone Data Source](docs/data-sources/zone.md)
 - [bind9_zones Data Source](docs/data-sources/zones.md)
 - [bind9_record Data Source](docs/data-sources/record.md)
@@ -1200,6 +1274,35 @@ Full documentation is available in the [docs](docs/) directory and on the [OpenT
 | Terraform >= 1.0 or OpenTofu >= 1.0 | Infrastructure as Code tool |
 | **[BIND9 REST API](https://github.com/harutyundermenjyan/bind9-api)** | **Required** - Must be installed on each BIND9 server |
 | BIND9 9.x | DNS server with rndc and nsupdate |
+
+### BIND9 Server Configuration Requirements
+
+Your BIND9 server needs these configuration files and settings:
+
+| File | Purpose | Owner | Permissions |
+|------|---------|-------|-------------|
+| `/etc/bind/named.conf` | Main config with includes | `root:bind` | `644` |
+| `/etc/bind/named.conf.acls` | ACL definitions (API-managed) | `bind:bind` | `664` |
+| `/etc/bind/rndc.key` | RNDC authentication | `bind:bind` | `640` |
+| `/etc/bind/keys/ddns-key.key` | TSIG key for updates | `bind:bind` | `640` |
+| `/var/lib/bind/` | Zone files directory | `bind:bind` | `755` |
+| `/opt/bind9-api/.env` | API configuration | `root:root` | `600` |
+
+**Critical BIND9 configuration:**
+
+```bind
+// /etc/bind/named.conf - Must include these:
+include "/etc/bind/rndc.key";
+include "/etc/bind/keys/ddns-key.key";
+include "/etc/bind/named.conf.acls";  // Required for bind9_acl resource
+
+// /etc/bind/named.conf.options - Required setting:
+options {
+    allow-new-zones yes;  // CRITICAL: Allows API to manage zones
+};
+```
+
+> **Full Setup Guide:** See [docs/guides/getting-started.md](docs/guides/getting-started.md) or the [BIND9 REST API Setup Guide](https://github.com/harutyundermenjyan/bind9-api/blob/main/SETUP.md)
 
 ---
 

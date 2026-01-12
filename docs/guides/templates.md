@@ -270,49 +270,68 @@ locals {
     if server.enabled
   }
 
-  # Define records once, deploy to all servers
+  # ==========================================================================
+  # Define records once, deploy to ALL or SELECTED servers
+  # ==========================================================================
+  # servers = []               → Deploy to ALL enabled servers
+  # servers = ["dns1"]         → Deploy to dns1 only
+  # servers = ["dns1", "dns2"] → Deploy to dns1 and dns2
+  # ==========================================================================
+  
   records = {
+    # Public records → ALL servers
     "www_A" = {
       name    = "www"
       type    = "A"
       ttl     = 300
       records = ["10.0.1.100"]
-      servers = []  # Empty = all servers
+      servers = []              # ALL servers
     }
     "api_A" = {
       name    = "api"
       type    = "A"
       ttl     = 300
       records = ["10.0.1.101"]
-      servers = []
-    }
-    "app_A" = {
-      name    = "app"
-      type    = "A"
-      ttl     = 300
-      records = ["10.0.1.102"]
-      servers = []
+      servers = []              # ALL servers
     }
     "mail_A" = {
       name    = "mail"
       type    = "A"
       ttl     = 300
       records = ["10.0.1.50"]
-      servers = []
+      servers = []              # ALL servers
     }
     "mx_MX" = {
       name    = "@"
       type    = "MX"
       ttl     = 3600
       records = ["10 mail.example.com."]
-      servers = []
+      servers = []              # ALL servers
     }
     "spf_TXT" = {
       name    = "@"
       type    = "TXT"
       ttl     = 3600
       records = ["v=spf1 mx -all"]
-      servers = []
+      servers = []              # ALL servers
+    }
+    
+    # Internal records → dns1 only
+    "db_A" = {
+      name    = "db"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.1.102"]
+      servers = ["dns1"]        # dns1 only (internal)
+    }
+    
+    # Staging records → dns2 only
+    "staging_A" = {
+      name    = "staging"
+      type    = "A"
+      ttl     = 300
+      records = ["10.0.1.200"]
+      servers = ["dns2"]        # dns2 only (staging env)
     }
   }
 
@@ -688,6 +707,345 @@ output "internal_services" {
     for name, ip in local.internal_services :
     name => "${name}.${var.internal_domain}"
   }
+}
+```
+
+---
+
+## Template 6: Access Control Lists (ACLs)
+
+Manage reusable ACLs that can be referenced by zones for access control.
+
+```terraform
+# =============================================================================
+# ACL Management Template
+# =============================================================================
+
+terraform {
+  required_version = ">= 1.0"
+  
+  required_providers {
+    bind9 = {
+      source  = "harutyundermenjyan/bind9"
+      version = "~> 1.0"
+    }
+  }
+}
+
+provider "bind9" {
+  endpoint = var.bind9_endpoint
+  api_key  = var.bind9_api_key
+}
+
+variable "bind9_endpoint" {
+  description = "BIND9 REST API endpoint"
+  type        = string
+}
+
+variable "bind9_api_key" {
+  description = "BIND9 REST API key"
+  type        = string
+  sensitive   = true
+}
+
+# =============================================================================
+# ACL Definitions
+# =============================================================================
+
+# Internal networks
+resource "bind9_acl" "internal" {
+  name = "internal"
+  
+  entries = [
+    "localhost",
+    "localnets",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+  ]
+  
+  comment = "RFC1918 private networks"
+}
+
+# Secondary DNS servers allowed for zone transfers
+resource "bind9_acl" "secondaries" {
+  name = "secondaries"
+  
+  entries = [
+    "10.0.1.11",             # Secondary NS 1
+    "10.0.1.12",             # Secondary NS 2
+    "key \"transfer-key\"",  # TSIG authenticated
+  ]
+  
+  comment = "Secondary DNS servers for zone transfers"
+}
+
+# Dynamic DNS update clients
+resource "bind9_acl" "ddns_clients" {
+  name = "ddns-clients"
+  
+  entries = [
+    "10.0.2.0/24",           # DHCP server network
+    "key \"ddns-key\"",      # TSIG key for updates
+  ]
+  
+  comment = "Hosts allowed for dynamic DNS updates"
+}
+
+# Monitoring servers
+resource "bind9_acl" "monitoring" {
+  name = "monitoring"
+  
+  entries = [
+    "10.0.0.50",             # Prometheus
+    "10.0.0.51",             # Grafana
+    "10.0.0.52",             # Nagios
+  ]
+  
+  comment = "Monitoring servers allowed for stats queries"
+}
+
+# DMZ networks
+resource "bind9_acl" "dmz" {
+  name = "dmz"
+  
+  entries = [
+    "10.0.10.0/24",
+  ]
+  
+  comment = "DMZ network segment"
+}
+
+# =============================================================================
+# Zone using ACLs
+# =============================================================================
+
+resource "bind9_zone" "example" {
+  name = var.domain
+  type = "master"
+
+  soa_mname   = "ns1.${var.domain}"
+  soa_rname   = "hostmaster.${var.domain}"
+  default_ttl = 3600
+
+  nameservers = ["ns1.${var.domain}", "ns2.${var.domain}"]
+  
+  ns_addresses = {
+    "ns1.${var.domain}" = var.ns1_ip
+    "ns2.${var.domain}" = var.ns2_ip
+  }
+
+  # Reference ACLs by name
+  allow_query    = ["internal", "any"]  # Internal + public
+  allow_transfer = ["secondaries"]       # Only to secondaries
+  allow_update   = ["ddns-clients"]      # Only DDNS clients
+  
+  notify = true
+
+  # Ensure ACLs are created before the zone
+  depends_on = [
+    bind9_acl.internal,
+    bind9_acl.secondaries,
+    bind9_acl.ddns_clients,
+  ]
+}
+
+variable "domain" {
+  default = "example.com"
+}
+
+variable "ns1_ip" {
+  default = "10.0.1.10"
+}
+
+variable "ns2_ip" {
+  default = "10.0.1.11"
+}
+
+# =============================================================================
+# Outputs
+# =============================================================================
+
+output "acls" {
+  value = {
+    internal    = bind9_acl.internal.name
+    secondaries = bind9_acl.secondaries.name
+    ddns        = bind9_acl.ddns_clients.name
+    monitoring  = bind9_acl.monitoring.name
+    dmz         = bind9_acl.dmz.name
+  }
+}
+```
+
+---
+
+## Template 7: Multi-Server ACLs
+
+Deploy ACLs to multiple BIND9 servers.
+
+```terraform
+# =============================================================================
+# Multi-Server ACL Template
+# =============================================================================
+
+variable "servers" {
+  type = map(object({
+    endpoint = string
+    api_key  = string
+    enabled  = bool
+  }))
+}
+
+# terraform.tfvars example:
+# servers = {
+#   "dns1" = {
+#     endpoint = "http://dns1.example.com:8080"
+#     api_key  = "key-for-dns1"
+#     enabled  = true
+#   }
+#   "dns2" = {
+#     endpoint = "http://dns2.example.com:8080"
+#     api_key  = "key-for-dns2"
+#     enabled  = true
+#   }
+# }
+
+provider "bind9" {
+  alias    = "dns1"
+  endpoint = var.servers["dns1"].endpoint
+  api_key  = var.servers["dns1"].api_key
+}
+
+provider "bind9" {
+  alias    = "dns2"
+  endpoint = var.servers["dns2"].endpoint
+  api_key  = var.servers["dns2"].api_key
+}
+
+# Default provider
+provider "bind9" {
+  endpoint = var.servers["dns1"].endpoint
+  api_key  = var.servers["dns1"].api_key
+}
+
+# =============================================================================
+# ACLs for dns1
+# =============================================================================
+
+resource "bind9_acl" "internal_dns1" {
+  count    = try(var.servers["dns1"].enabled, false) ? 1 : 0
+  provider = bind9.dns1
+
+  name    = "internal"
+  entries = ["localhost", "localnets", "10.0.0.0/8", "172.16.0.0/12"]
+  comment = "Internal networks"
+}
+
+resource "bind9_acl" "secondaries_dns1" {
+  count    = try(var.servers["dns1"].enabled, false) ? 1 : 0
+  provider = bind9.dns1
+
+  name    = "secondaries"
+  entries = ["10.0.1.11", "10.0.1.12", "key \"transfer-key\""]
+  comment = "Secondary DNS servers"
+}
+
+resource "bind9_acl" "ddns_dns1" {
+  count    = try(var.servers["dns1"].enabled, false) ? 1 : 0
+  provider = bind9.dns1
+
+  name    = "ddns-clients"
+  entries = ["10.0.2.0/24", "key \"ddns-key\""]
+  comment = "Dynamic DNS clients"
+}
+
+# =============================================================================
+# ACLs for dns2
+# =============================================================================
+
+resource "bind9_acl" "internal_dns2" {
+  count    = try(var.servers["dns2"].enabled, false) ? 1 : 0
+  provider = bind9.dns2
+
+  name    = "internal"
+  entries = ["localhost", "localnets", "10.0.0.0/8", "172.16.0.0/12"]
+  comment = "Internal networks"
+}
+
+resource "bind9_acl" "secondaries_dns2" {
+  count    = try(var.servers["dns2"].enabled, false) ? 1 : 0
+  provider = bind9.dns2
+
+  name    = "secondaries"
+  entries = ["10.0.1.10", "10.0.1.12", "key \"transfer-key\""]  # Note: different IPs for dns2
+  comment = "Secondary DNS servers"
+}
+
+resource "bind9_acl" "ddns_dns2" {
+  count    = try(var.servers["dns2"].enabled, false) ? 1 : 0
+  provider = bind9.dns2
+
+  name    = "ddns-clients"
+  entries = ["10.0.2.0/24", "key \"ddns-key\""]
+  comment = "Dynamic DNS clients"
+}
+
+# =============================================================================
+# Zones that depend on ACLs
+# =============================================================================
+
+resource "bind9_zone" "example_dns1" {
+  count    = try(var.servers["dns1"].enabled, false) ? 1 : 0
+  provider = bind9.dns1
+
+  name        = "example.com"
+  type        = "master"
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  default_ttl = 3600
+  
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+
+  allow_query    = ["internal", "any"]
+  allow_transfer = ["secondaries"]
+  allow_update   = ["ddns-clients"]
+
+  depends_on = [
+    bind9_acl.internal_dns1,
+    bind9_acl.secondaries_dns1,
+    bind9_acl.ddns_dns1,
+  ]
+}
+
+resource "bind9_zone" "example_dns2" {
+  count    = try(var.servers["dns2"].enabled, false) ? 1 : 0
+  provider = bind9.dns2
+
+  name        = "example.com"
+  type        = "master"
+  soa_mname   = "ns1.example.com"
+  soa_rname   = "hostmaster.example.com"
+  default_ttl = 3600
+  
+  nameservers = ["ns1.example.com", "ns2.example.com"]
+  ns_addresses = {
+    "ns1.example.com" = "10.0.1.10"
+    "ns2.example.com" = "10.0.1.11"
+  }
+
+  allow_query    = ["internal", "any"]
+  allow_transfer = ["secondaries"]
+  allow_update   = ["ddns-clients"]
+
+  depends_on = [
+    bind9_acl.internal_dns2,
+    bind9_acl.secondaries_dns2,
+    bind9_acl.ddns_dns2,
+  ]
 }
 ```
 

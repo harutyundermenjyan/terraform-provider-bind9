@@ -37,10 +37,54 @@ variable "bind9_api_key" {
 }
 
 # =============================================================================
+# Access Control Lists (ACLs)
+# =============================================================================
+
+# Internal networks ACL
+resource "bind9_acl" "internal" {
+  name = "internal"
+  
+  entries = [
+    "localhost",
+    "localnets",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+  ]
+  
+  comment = "RFC1918 private networks"
+}
+
+# Secondary DNS servers allowed for zone transfers
+resource "bind9_acl" "secondaries" {
+  name = "secondaries"
+  
+  entries = [
+    "192.168.1.11",           # ns2
+    "192.168.1.12",           # ns3
+    "key \"transfer-key\"",   # TSIG authenticated transfers
+  ]
+  
+  comment = "Secondary DNS servers for zone transfers"
+}
+
+# Dynamic DNS update clients
+resource "bind9_acl" "ddns_clients" {
+  name = "ddns-clients"
+  
+  entries = [
+    "192.168.2.0/24",         # DHCP server network
+    "key \"ddns-key\"",       # TSIG key for updates
+  ]
+  
+  comment = "Hosts allowed for dynamic DNS updates"
+}
+
+# =============================================================================
 # Zone Management
 # =============================================================================
 
-# Create a master zone
+# Create a master zone using ACLs for access control
 resource "bind9_zone" "example" {
   name = "example.com"
   type = "master"
@@ -54,18 +98,33 @@ resource "bind9_zone" "example" {
   soa_minimum = 3600
   default_ttl = 3600
   
-  # Initial nameservers
+  # Initial nameservers with glue records
   nameservers = [
     "ns1.example.com",
     "ns2.example.com",
   ]
   
-  # Zone transfer settings
-  allow_transfer = ["192.168.1.0/24"]
-  notify         = true
+  ns_addresses = {
+    "ns1.example.com" = "192.168.1.10"
+    "ns2.example.com" = "192.168.1.11"
+  }
+  
+  # Access control using ACLs defined above
+  allow_query    = ["internal", "any"]    # Internal + public queries
+  allow_transfer = ["secondaries"]         # Only to secondary NS
+  allow_update   = ["ddns-clients"]        # Only DDNS clients
+  
+  notify = true
   
   # Delete zone file when zone is destroyed
   delete_file_on_destroy = false
+
+  # Ensure ACLs exist before creating zone
+  depends_on = [
+    bind9_acl.internal,
+    bind9_acl.secondaries,
+    bind9_acl.ddns_clients,
+  ]
 }
 
 # =============================================================================
@@ -346,3 +405,11 @@ output "a_record_count" {
   value       = length(data.bind9_records.a_records.records)
 }
 
+output "acls_configured" {
+  description = "ACLs configured for this zone"
+  value = {
+    internal    = bind9_acl.internal.name
+    secondaries = bind9_acl.secondaries.name
+    ddns        = bind9_acl.ddns_clients.name
+  }
+}
