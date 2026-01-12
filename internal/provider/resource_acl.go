@@ -259,9 +259,8 @@ func (r *ACLResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 	plan.Entries = entriesList
 
-	if aclResp.Comment != "" {
-		plan.Comment = types.StringValue(aclResp.Comment)
-	}
+	// Always set comment (even if empty) since it's computed
+	plan.Comment = types.StringValue(aclResp.Comment)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -322,11 +321,8 @@ func (r *ACLResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	}
 	state.Entries = entriesList
 
-	if aclResp.Comment != "" {
-		state.Comment = types.StringValue(aclResp.Comment)
-	} else {
-		state.Comment = types.StringNull()
-	}
+	// Always set comment (even if empty) since it's computed
+	state.Comment = types.StringValue(aclResp.Comment)
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
@@ -398,9 +394,8 @@ func (r *ACLResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	}
 	plan.Entries = entriesList
 
-	if aclResp.Comment != "" {
-		plan.Comment = types.StringValue(aclResp.Comment)
-	}
+	// Always set comment (even if empty) since it's computed
+	plan.Comment = types.StringValue(aclResp.Comment)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
