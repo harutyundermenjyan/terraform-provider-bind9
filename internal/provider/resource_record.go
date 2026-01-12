@@ -617,13 +617,28 @@ func (r *RecordResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	for _, rdata := range records {
 		err := r.client.DeleteRecord(ctx, state.Zone.ValueString(), state.Name.ValueString(), state.Type.ValueString(), rdata)
 		if err != nil {
-			if !strings.Contains(err.Error(), "404") && !strings.Contains(err.Error(), "not found") {
-				resp.Diagnostics.AddError(
-					"Error Deleting Record",
-					fmt.Sprintf("Could not delete record: %s", err.Error()),
-				)
-				return
+			errStr := strings.ToLower(err.Error())
+			// Treat these errors as success - the record is effectively deleted:
+			// - 404/not found: record doesn't exist
+			// - REFUSED: zone was already deleted (BIND9 auto-removes records with zone)
+			// - zone not found: zone was already deleted
+			if strings.Contains(errStr, "404") ||
+				strings.Contains(errStr, "not found") ||
+				strings.Contains(errStr, "refused") ||
+				strings.Contains(errStr, "no matching zone") {
+				tflog.Debug(ctx, "Record already deleted or zone removed", map[string]any{
+					"zone":  state.Zone.ValueString(),
+					"name":  state.Name.ValueString(),
+					"type":  state.Type.ValueString(),
+					"error": err.Error(),
+				})
+				continue
 			}
+			resp.Diagnostics.AddError(
+				"Error Deleting Record",
+				fmt.Sprintf("Could not delete record: %s", err.Error()),
+			)
+			return
 		}
 	}
 }
