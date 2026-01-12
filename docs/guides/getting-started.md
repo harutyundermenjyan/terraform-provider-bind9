@@ -117,13 +117,17 @@ controls {
 };
 ```
 
-Create the ACL file (for `bind9_acl` resource):
+Set up permissions for ACL management (for `bind9_acl` resource):
 
 ```bash
-touch /etc/bind/named.conf.acls
-chown bind:bind /etc/bind/named.conf.acls
-chmod 664 /etc/bind/named.conf.acls
+# Allow the API to create/manage the ACL file
+chmod g+w /etc/bind
+
+# The API will automatically create /etc/bind/named.conf.acls
+# when the first ACL is created via Terraform
 ```
+
+> **Note:** The `bind9_acl` resource will automatically create the ACL file if it doesn't exist. The `/etc/bind` directory must be group-writable by the `bind` group for this to work.
 
 #### Step 5: Install BIND9 REST API
 
