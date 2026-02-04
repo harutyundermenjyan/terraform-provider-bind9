@@ -5,6 +5,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -331,6 +332,7 @@ func (r *RecordResource) Create(ctx context.Context, req resource.CreateRequest,
 }
 
 // setComputedAttributes sets the computed convenience attributes based on record type
+// Used during Create to initialize all computed attributes
 func (r *RecordResource) setComputedAttributes(model *RecordResourceModel, records []string) {
 	// Set all computed attributes to empty/zero values (not null, which stays "unknown")
 	model.Address = types.StringValue("")
@@ -389,6 +391,59 @@ func (r *RecordResource) setComputedAttributes(model *RecordResourceModel, recor
 			model.Value = types.StringValue(strings.Trim(parts[2], "\""))
 		}
 	}
+}
+
+// setRelevantComputedAttributes sets ONLY the computed attributes relevant to this record type
+// Used during Read to avoid setting irrelevant attributes that cause drift
+func (r *RecordResource) setRelevantComputedAttributes(model *RecordResourceModel, records []string) {
+	if len(records) == 0 {
+		return
+	}
+
+	rdata := records[0]
+	recordType := model.Type.ValueString()
+
+	// Only set the attributes that are actually relevant for this record type
+	switch recordType {
+	case "A", "AAAA":
+		model.Address = types.StringValue(rdata)
+	case "CNAME", "DNAME", "NS", "PTR":
+		model.Target = types.StringValue(rdata)
+	case "TXT":
+		model.Text = types.StringValue(strings.Trim(rdata, "\""))
+	case "MX":
+		parts := strings.SplitN(rdata, " ", 2)
+		if len(parts) == 2 {
+			if priority, err := parseInt64(parts[0]); err == nil {
+				model.Priority = types.Int64Value(priority)
+			}
+			model.Target = types.StringValue(parts[1])
+		}
+	case "SRV":
+		parts := strings.SplitN(rdata, " ", 4)
+		if len(parts) == 4 {
+			if priority, err := parseInt64(parts[0]); err == nil {
+				model.Priority = types.Int64Value(priority)
+			}
+			if weight, err := parseInt64(parts[1]); err == nil {
+				model.Weight = types.Int64Value(weight)
+			}
+			if port, err := parseInt64(parts[2]); err == nil {
+				model.Port = types.Int64Value(port)
+			}
+			model.Target = types.StringValue(parts[3])
+		}
+	case "CAA":
+		parts := strings.SplitN(rdata, " ", 3)
+		if len(parts) == 3 {
+			if flags, err := parseInt64(parts[0]); err == nil {
+				model.Flags = types.Int64Value(flags)
+			}
+			model.Tag = types.StringValue(parts[1])
+			model.Value = types.StringValue(strings.Trim(parts[2], "\""))
+		}
+	}
+	// For other record types, don't set any computed attributes - leave them as-is from state
 }
 
 // parseInt64 helper
@@ -493,6 +548,9 @@ func (r *RecordResource) Read(ctx context.Context, req resource.ReadRequest, res
 		recordValues = append(recordValues, rec.RData)
 	}
 
+	// Sort records for consistent comparison (prevents constant drift)
+	sort.Strings(recordValues)
+
 	recordsList, diags := types.ListValueFrom(ctx, types.StringType, recordValues)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -502,8 +560,9 @@ func (r *RecordResource) Read(ctx context.Context, req resource.ReadRequest, res
 	state.Records = recordsList
 	state.TTL = types.Int64Value(int64(records[0].TTL))
 
-	// Set computed convenience attributes
-	r.setComputedAttributes(&state, recordValues)
+	// Set ONLY the computed attributes relevant to this record type
+	// Don't set all attributes to 0/"" - that causes drift
+	r.setRelevantComputedAttributes(&state, recordValues)
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
