@@ -1,0 +1,222 @@
+# ==============================================================================
+# BIND9 Terraform Configuration Generator
+# ==============================================================================
+# This file defines the parameters for generating Terraform/OpenTofu
+# configurations for managing BIND9 DNS servers.
+#
+# Usage:
+#   python generate.py                    # Generate using this config
+#   python generate.py -c custom.yaml     # Use custom config file
+#   python generate.py -o ./my-output     # Custom output directory
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Terraform Provider
+# ------------------------------------------------------------------------------
+provider:
+  version: ">= 1.0.4"
+
+# ------------------------------------------------------------------------------
+# BIND9 Servers
+# ------------------------------------------------------------------------------
+# Define as many servers as needed. The generator will create provider aliases
+# and resource blocks for each server automatically.
+#
+# Each server gets:
+#   - A provider alias
+#   - ACL resources filtered by server targeting
+#   - Zone resources filtered by server targeting
+#   - Record resources filtered by server targeting
+servers:
+  - name: dns1
+    endpoint: "http://dns1.example.com:8080"
+    api_key: "your-api-key-for-dns1"
+    enabled: true
+
+  - name: dns2
+    endpoint: "http://dns2.example.com:8080"
+    api_key: "your-api-key-for-dns2"
+    enabled: true
+
+  # Add more servers as needed:
+  # - name: dns3
+  #   endpoint: "http://dns3.example.com:8080"
+  #   api_key: "your-api-key-for-dns3"
+  #   enabled: true
+
+# ------------------------------------------------------------------------------
+# ACLs - Access Control Lists
+# ------------------------------------------------------------------------------
+# Define ACLs that will be created on BIND9 servers.
+# servers: []           -> deploy to ALL servers (default)
+# servers: ["dns1"]     -> deploy only to dns1
+acls:
+  - name: internal
+    entries:
+      - localhost
+      - localnets
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    comment: "Internal/trusted networks"
+    servers: []
+
+  - name: trusted-secondaries
+    entries:
+      - "10.0.1.11"
+      - "10.0.1.12"
+      - 'key "transfer-key"'
+    comment: "Secondary DNS servers"
+    servers: []
+
+  - name: ddns-clients
+    entries:
+      - "10.0.0.0/8"
+      - 'key "ddns-key"'
+    comment: "Dynamic DNS update clients"
+    servers: []
+
+# ------------------------------------------------------------------------------
+# Zone Defaults
+# ------------------------------------------------------------------------------
+# These values are applied to all zones unless overridden per-zone.
+zone_defaults:
+  soa_mname: "ns1.example.com"
+  soa_rname: "hostmaster.example.com"
+  soa_refresh: 3600
+  soa_retry: 600
+  soa_expire: 604800
+  soa_minimum: 86400
+  default_ttl: 3600
+
+  # Nameservers for all zones
+  nameservers:
+    - "ns1.example.com"
+    - "ns2.example.com"
+
+  # Glue records (NS IP addresses)
+  ns_addresses:
+    "ns1.example.com": "10.0.1.10"
+    "ns2.example.com": "10.0.1.11"
+
+  # Access control (reference ACL names defined above)
+  allow_query:
+    - any
+  allow_transfer:
+    - trusted-secondaries
+  allow_update:
+    - ddns-clients
+
+# ------------------------------------------------------------------------------
+# Zones
+# ------------------------------------------------------------------------------
+# Define the DNS zones to manage.
+# servers: []           -> deploy to ALL servers (default)
+# servers: ["dns1"]     -> deploy only to dns1
+zones:
+  - name: example.com
+    servers: []
+
+  - name: internal.example.com
+    servers: []
+
+  # Add more zones:
+  # - name: other.domain.com
+  #   servers: ["dns1"]    # Only on dns1
+
+# ------------------------------------------------------------------------------
+# Records
+# ------------------------------------------------------------------------------
+# Define DNS records for each zone.
+# servers: []           -> deploy to ALL servers (default)
+# servers: ["dns1"]     -> deploy only to dns1
+records:
+  # -- example.com records --
+  - zone: example.com
+    name: www
+    type: A
+    ttl: 300
+    records:
+      - "10.0.1.50"
+      - "10.0.1.51"
+    servers: []
+
+  - zone: example.com
+    name: "@"
+    type: MX
+    ttl: 3600
+    records:
+      - "10 mail.example.com."
+      - "20 mail2.example.com."
+    servers: []
+
+  - zone: example.com
+    name: "@"
+    type: TXT
+    ttl: 3600
+    records:
+      - "v=spf1 include:_spf.google.com ~all"
+    servers: []
+
+  - zone: example.com
+    name: mail
+    type: A
+    ttl: 3600
+    records:
+      - "10.0.1.60"
+    servers: []
+
+  - zone: example.com
+    name: blog
+    type: CNAME
+    ttl: 3600
+    records:
+      - "www.example.com."
+    servers: []
+
+  - zone: example.com
+    name: "@"
+    type: CAA
+    ttl: 3600
+    records:
+      - '0 issue "letsencrypt.org"'
+    servers: []
+
+  # -- internal.example.com records --
+  - zone: internal.example.com
+    name: app
+    type: A
+    ttl: 300
+    records:
+      - "10.0.2.50"
+    servers: []
+
+  - zone: internal.example.com
+    name: db
+    type: A
+    ttl: 300
+    records:
+      - "10.0.2.60"
+    servers: []
+
+  - zone: internal.example.com
+    name: cache
+    type: A
+    ttl: 300
+    records:
+      - "10.0.2.70"
+    servers: []
+
+  - zone: internal.example.com
+    name: _sip._tcp
+    type: SRV
+    ttl: 3600
+    records:
+      - "10 60 5060 sip.internal.example.com."
+    servers: []
+
+# ------------------------------------------------------------------------------
+# Output Options
+# ------------------------------------------------------------------------------
+output:
+  directory: "./generated"
