@@ -6,6 +6,8 @@ Define your servers, zones, records, and ACLs in a simple `config.yaml`, then ru
 
 ## Quick Start
 
+### Option A: Direct install
+
 ```bash
 # Install dependency
 pip install pyyaml
@@ -21,6 +23,33 @@ cd generated
 tofu init
 tofu plan
 tofu apply
+```
+
+### Option B: Using Python virtual environment (recommended)
+
+```bash
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate      # Linux/macOS
+# venv\Scripts\activate       # Windows
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Edit config.yaml with your settings
+vim config.yaml
+
+# Generate Terraform configurations
+python generate.py
+
+# Deploy
+cd generated
+tofu init
+tofu plan
+tofu apply
+
+# Deactivate when done
+deactivate
 ```
 
 ## Configuration
