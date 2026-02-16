@@ -324,6 +324,11 @@ func (r *RecordResource) Create(ctx context.Context, req resource.CreateRequest,
 	// Set ID
 	plan.ID = types.StringValue(fmt.Sprintf("%s/%s/%s", plan.Zone.ValueString(), plan.Name.ValueString(), plan.Type.ValueString()))
 
+	// Sync zone to flush journal so subsequent reads return fresh data
+	if err := r.client.SyncZone(ctx, plan.Zone.ValueString()); err != nil {
+		tflog.Warn(ctx, "Could not sync zone after create", map[string]any{"error": err.Error()})
+	}
+
 	// Set ALL computed attributes to known values (required after Create)
 	r.setComputedAttributes(&plan, records)
 
@@ -608,33 +613,23 @@ func (r *RecordResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	// Delete old records that are no longer present
-	for _, oldRdata := range oldRecords {
-		found := false
-		for _, newRdata := range newRecords {
-			if oldRdata == newRdata {
-				found = true
-				break
-			}
-		}
-		if !found {
+	// Check if any non-rdata attributes changed (TTL, class, etc.)
+	// DNS doesn't support in-place attribute changes - must delete and recreate
+	attributesChanged := state.TTL.ValueInt64() != plan.TTL.ValueInt64() ||
+		state.Class.ValueString() != plan.Class.ValueString()
+
+	if attributesChanged {
+		// Full replace: delete all old records, recreate all with new attributes
+		tflog.Debug(ctx, "Record attributes changed (TTL/class), performing full replace")
+
+		for _, oldRdata := range oldRecords {
 			err := r.client.DeleteRecord(ctx, plan.Zone.ValueString(), plan.Name.ValueString(), plan.Type.ValueString(), oldRdata)
 			if err != nil {
-				tflog.Warn(ctx, "Could not delete old record", map[string]any{"error": err.Error()})
+				tflog.Warn(ctx, "Could not delete old record during replace", map[string]any{"error": err.Error()})
 			}
 		}
-	}
 
-	// Add new records that don't exist
-	for _, newRdata := range newRecords {
-		found := false
-		for _, oldRdata := range oldRecords {
-			if oldRdata == newRdata {
-				found = true
-				break
-			}
-		}
-		if !found {
+		for _, newRdata := range newRecords {
 			createReq := &RecordCreateRequest{
 				RecordType:  plan.Type.ValueString(),
 				Name:        plan.Name.ValueString(),
@@ -646,11 +641,60 @@ func (r *RecordResource) Update(ctx context.Context, req resource.UpdateRequest,
 			if err != nil {
 				resp.Diagnostics.AddError(
 					"Error Updating Record",
-					fmt.Sprintf("Could not create record: %s", err.Error()),
+					fmt.Sprintf("Could not recreate record with new attributes: %s", err.Error()),
 				)
 				return
 			}
 		}
+	} else {
+		// Only rdata changed - selective delete/add
+		for _, oldRdata := range oldRecords {
+			found := false
+			for _, newRdata := range newRecords {
+				if oldRdata == newRdata {
+					found = true
+					break
+				}
+			}
+			if !found {
+				err := r.client.DeleteRecord(ctx, plan.Zone.ValueString(), plan.Name.ValueString(), plan.Type.ValueString(), oldRdata)
+				if err != nil {
+					tflog.Warn(ctx, "Could not delete old record", map[string]any{"error": err.Error()})
+				}
+			}
+		}
+
+		for _, newRdata := range newRecords {
+			found := false
+			for _, oldRdata := range oldRecords {
+				if oldRdata == newRdata {
+					found = true
+					break
+				}
+			}
+			if !found {
+				createReq := &RecordCreateRequest{
+					RecordType:  plan.Type.ValueString(),
+					Name:        plan.Name.ValueString(),
+					TTL:         int(plan.TTL.ValueInt64()),
+					RecordClass: plan.Class.ValueString(),
+					Data:        r.buildRecordData(plan.Type.ValueString(), newRdata),
+				}
+				_, err := r.client.CreateRecord(ctx, plan.Zone.ValueString(), createReq)
+				if err != nil {
+					resp.Diagnostics.AddError(
+						"Error Updating Record",
+						fmt.Sprintf("Could not create record: %s", err.Error()),
+					)
+					return
+				}
+			}
+		}
+	}
+
+	// Sync zone to flush journal so subsequent reads return fresh data
+	if err := r.client.SyncZone(ctx, plan.Zone.ValueString()); err != nil {
+		tflog.Warn(ctx, "Could not sync zone after update", map[string]any{"error": err.Error()})
 	}
 
 	// Set ALL computed attributes to known values (required after Update)

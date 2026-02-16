@@ -377,6 +377,16 @@ func (c *Client) DeleteRecord(ctx context.Context, zone, name, recordType, rdata
 	return c.parseResponse(resp, nil)
 }
 
+// SyncZone flushes the journal to the zone file so reads return fresh data
+func (c *Client) SyncZone(ctx context.Context, zone string) error {
+	path := "/api/v1/zones/" + url.PathEscape(zone) + "/sync"
+	resp, err := c.doRequest(ctx, "POST", path, nil)
+	if err != nil {
+		return err
+	}
+	return c.parseResponse(resp, nil)
+}
+
 // ============================================================================
 // DNSSEC Operations
 // ============================================================================
