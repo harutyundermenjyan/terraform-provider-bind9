@@ -324,15 +324,15 @@ func (r *RecordResource) Create(ctx context.Context, req resource.CreateRequest,
 	// Set ID
 	plan.ID = types.StringValue(fmt.Sprintf("%s/%s/%s", plan.Zone.ValueString(), plan.Name.ValueString(), plan.Type.ValueString()))
 
-	// Set ONLY relevant computed attributes (must match Read to prevent drift)
-	r.setRelevantComputedAttributes(&plan, records)
+	// Set ALL computed attributes to known values (required after Create)
+	r.setComputedAttributes(&plan, records)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 }
 
 // setComputedAttributes sets the computed convenience attributes based on record type
-// Used during Create to initialize all computed attributes
+// Used during Create and Update - must set ALL attributes to known values
 func (r *RecordResource) setComputedAttributes(model *RecordResourceModel, records []string) {
 	// Set all computed attributes to empty/zero values (not null, which stays "unknown")
 	model.Address = types.StringValue("")
@@ -393,9 +393,20 @@ func (r *RecordResource) setComputedAttributes(model *RecordResourceModel, recor
 	}
 }
 
-// setRelevantComputedAttributes sets ONLY the computed attributes relevant to this record type
-// Used during Read to avoid setting irrelevant attributes that cause drift
+// setRelevantComputedAttributes sets computed attributes during Read
+// Initializes all to zero/empty (matching Create/Update) then sets relevant ones
 func (r *RecordResource) setRelevantComputedAttributes(model *RecordResourceModel, records []string) {
+	// Initialize all to zero/empty (must match setComputedAttributes defaults)
+	model.Address = types.StringValue("")
+	model.Target = types.StringValue("")
+	model.Priority = types.Int64Value(0)
+	model.Weight = types.Int64Value(0)
+	model.Port = types.Int64Value(0)
+	model.Text = types.StringValue("")
+	model.Flags = types.Int64Value(0)
+	model.Tag = types.StringValue("")
+	model.Value = types.StringValue("")
+
 	if len(records) == 0 {
 		return
 	}
@@ -403,7 +414,7 @@ func (r *RecordResource) setRelevantComputedAttributes(model *RecordResourceMode
 	rdata := records[0]
 	recordType := model.Type.ValueString()
 
-	// Only set the attributes that are actually relevant for this record type
+	// Set the attributes relevant for this record type
 	switch recordType {
 	case "A", "AAAA":
 		model.Address = types.StringValue(rdata)
@@ -642,8 +653,8 @@ func (r *RecordResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
-	// Set ONLY relevant computed attributes (must match Read to prevent drift)
-	r.setRelevantComputedAttributes(&plan, newRecords)
+	// Set ALL computed attributes to known values (required after Update)
+	r.setComputedAttributes(&plan, newRecords)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
