@@ -324,8 +324,8 @@ func (r *RecordResource) Create(ctx context.Context, req resource.CreateRequest,
 	// Set ID
 	plan.ID = types.StringValue(fmt.Sprintf("%s/%s/%s", plan.Zone.ValueString(), plan.Name.ValueString(), plan.Type.ValueString()))
 
-	// Set computed convenience attributes based on record type and data
-	r.setComputedAttributes(&plan, records)
+	// Set ONLY relevant computed attributes (must match Read to prevent drift)
+	r.setRelevantComputedAttributes(&plan, records)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -642,8 +642,8 @@ func (r *RecordResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
-	// Set computed convenience attributes
-	r.setComputedAttributes(&plan, newRecords)
+	// Set ONLY relevant computed attributes (must match Read to prevent drift)
+	r.setRelevantComputedAttributes(&plan, newRecords)
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
