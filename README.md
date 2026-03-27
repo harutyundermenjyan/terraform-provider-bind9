@@ -6,6 +6,8 @@
 
 A Terraform/OpenTofu provider for managing DNS zones and records on BIND9 servers via REST API.
 
+📖 **Blog Post:** [Automating BIND9 DNS Management: From Manual Configs to Infrastructure as Code](https://medium.com/dev-genius/automating-bind9-dns-management-from-manual-configs-to-infrastructure-as-code-84292214b5a5)
+
 ---
 
 ## ⚠️ Required: BIND9 REST API
